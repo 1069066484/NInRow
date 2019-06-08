@@ -5,7 +5,7 @@ The entrance script is NInRow.py.
 
 
 09-06-2018
-MCTS-UCT algorithm is implmented. The AI can defeat human player in a 6*6 board with 20000 simulations.
+MCTS-UCT algorithm is implmented. The AI can defeat human player in a 6*6 board with 20000 simulations if given the first move.
 
 
 
