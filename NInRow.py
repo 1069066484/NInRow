@@ -132,22 +132,29 @@ class Game:
         return MCTS_UCT.check_over_full(self.board.board, pos, self.n_in_row)
 
 
-
-import argparse
-parser = argparse.ArgumentParser()
-parser.add_argument("-p1", "--player1", help="role of player1: 0 for AI or 1 for human", type=int, required=True)
-parser.add_argument("-p2", "--player2", help="role of player1: 0 for AI or 1 for human", type=int, required=True)
-parser.add_argument("-d1", "--difficulty1", help="difficulty of AI1, ranging from 1000-INF, work only if player1 is AI",
-                    type=int, default=20000)
-parser.add_argument("-d2", "--difficulty2", help="difficulty of AI1, ranging from 1000-INF, work only if player1 is AI",
-                    type=int, default=20000)
-
-
-
-if __name__=='__main__':
+def main_exe():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-p1", "--player1", help="role of player1: 0 for AI or 1 for human", type=int, required=True)
+    parser.add_argument("-p2", "--player2", help="role of player1: 0 for AI or 1 for human", type=int, required=True)
+    parser.add_argument("-d1", "--difficulty1", help="difficulty of AI1, ranging from 1000-INF, work only if player1 is AI",
+                        type=int, default=20000)
+    parser.add_argument("-d2", "--difficulty2", help="difficulty of AI1, ranging from 1000-INF, work only if player1 is AI",
+                        type=int, default=20000)
     args, _ = parser.parse_known_args(sys.argv[1:])
     game = Game(5,5,4,Game.Player(args.player1),Game.Player(args.player2))
     game.players[0].set_strength(args.difficulty1)
     game.players[1].set_strength(args.difficulty2)
     game.start()
     input("Press any key to exit")
+
+
+def main_debug():
+    game = Game(6,6,4,Game.Player.AI,Game.Player.human)
+    game.players[0].set_strength(20000)
+    game.players[1].set_strength(20000)
+    game.start()
+
+
+if __name__=='__main__':
+    main_debug()
