@@ -25,14 +25,14 @@ class Termination(IntEnum):
     tie = 102
 
 
-def init(board_cols_, board_rows_, n_target_=5, max_t_=5, max_acts_=1000):
+def init(board_rows_, board_cols_, n_target_=5, max_t_=5, max_acts_=1000):
     global board_cols, board_rows, n_target, max_t, max_acts
     n_target = n_target_
     max_t = max_t_
     max_acts = max_acts_
     board_cols = board_cols_
     board_rows = board_rows_
-
+    
 
 def set_max_act(max_acts_):
     global max_acts
