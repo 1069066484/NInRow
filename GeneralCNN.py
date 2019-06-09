@@ -191,7 +191,7 @@ class GeneralCNN:
                 print("iteration:",i,' global_step:',global_step, '  train_acc: ',self.run_acc(self.X, self.Y), '   test_acc:', 
                       -1.0 if self.X_te is None else self.run_acc(self.X_te, self.Y_te))
                 if self.path is not None:
-                    self.saver.save(sess, self.path + '/123', global_step=global_step_t, write_meta_graph=False)
+                    self.saver.save(sess, self.path + '/model', global_step=global_step_t, write_meta_graph=False)
 
     def predict(self, X):
         if self.sess is None:
