@@ -2,6 +2,7 @@
 """
 @Author: Zhixin Ling
 @Description: Part of the NinRowAI-AlphaRow: MCTS of UCT algorithm's implementation.
+    DEPRECATED!
 """
 import numpy as np
 from enum import IntEnum
