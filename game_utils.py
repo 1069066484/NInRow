@@ -1,3 +1,9 @@
+# -*- coding: utf-8 -*-
+"""
+@Author: Zhixin Ling
+@Description: Part of the NinRowAI: console interface and game board logit.
+"""
+
 from random import choice, shuffle
 from math import log, sqrt
 import numpy as np
@@ -7,7 +13,7 @@ import os
 import sys
 
 
-over_funs = [
+move_funs = [
     lambda i,p:(p[0]+i,p[i]+i),
     lambda i,p:(p[0]-i,p[i]+i),
     lambda i,p:(p[0],p[i]+i),
@@ -150,7 +156,7 @@ class Game:
         def is_pos_legal(pos):
             return board.shape[0] > pos[0] >= 0 and board.shape[1] > pos[1] >= 0
         bd = board
-        for f in over_funs:
+        for f in move_funs:
             role = bd[pos[0]][pos[1]]
             score = 0
             pos_t = pos

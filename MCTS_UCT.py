@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 @Author: Zhixin Ling
-@Description: Part of the NinRowAI-AlphaRow: MCTS of UCT algorithm's implementation.
-    DEPRECATED!
+@Description: Part of the NinRowAI: MCTS of UCT algorithm's implementation.
+    DEPRECATED! Use class MctsUct instead.
 """
 import numpy as np
 from enum import IntEnum

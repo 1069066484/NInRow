@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @Author: Zhixin Ling
-@Description: Part of the NinRowAI-AlphaRow: console interface and game board logit.
+@Description: Part of the NinRowAI: entrace script.
 """
 
 from random import choice, shuffle
@@ -31,34 +31,11 @@ def main_exe():
 
 
 def main_debug():
-    player1_wincnt = 0
-    player2_wincnt = 0
-    #inh1 = True
-    for i in range(50):
-        game = Game(4,4,4,Game.Player.AI,Game.Player.AI)
-        game.players[0].set_strength(50)
-        game.players[1].set_strength(100)
-        game.players[1].mcts.set_inherit(True)
-        game.start(graphics=False)
-        player1_wincnt += game.winner == 0
-        player2_wincnt += game.winner == 1
-        print(player1_wincnt, player2_wincnt)
-"""
-12 88 
-game.players[0].set_strength(10)
-game.players[1].set_strength(50)
-game.players[1].mcts.set_inherit(False)
-
-50: 28 20 / 21 28 / 20 27 / 31 17
-game.players[0].set_strength(50)
-game.players[1].set_strength(100)
-game.players[1].mcts.set_inherit(True)
-
-50: 29 17 / 39 10 / 30 15 / 37 12
-game.players[0].set_strength(50)
-game.players[1].set_strength(100)
-game.players[1].mcts.set_inherit(False)
-"""
+    game = Game(5,5,4,Game.Player.AI,Game.Player.human)
+    game.players[0].set_strength(10000)
+    game.players[0].mcts.fix_p = True
+    game.players[1].set_strength(1000)
+    game.start(graphics=True)
 
 
 if __name__=='__main__':

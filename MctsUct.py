@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @Author: Zhixin Ling
-@Description: Part of the NinRowAI-AlphaRow: MCTS of UCT algorithm's implementation, class encapulated
+@Description: Part of the NinRowAI: MCTS of UCT algorithm's implementation, class encapulated.
 """
 
 
@@ -16,7 +16,7 @@ class Grid(IntEnum):
     GRID_SEL = -GRID_ENY
 
 class Node:
-    def __init__(self, parent=None, move=None, role=None, sim_board=None, mcts=None):
+    def __init__(self, parent=None, move=None, role=None, sim_board=None, mcts=None, p=1):
         self.visits = 0
         self.value = 0.0
         self.role = role
@@ -28,6 +28,26 @@ class Node:
         self.childrens = []
         self.avails = self.init_avails() #empty grids
         self.unvisited = self.avails.copy()
+        self.p = p if isinstance(p, int) else self.auto_p()
+
+    def auto_p(self):
+        move_funs = game_utils.move_funs
+        bd = self.sim_board
+        pscore = 1.0
+        pos = self.move
+        if pos is None:
+            return 1.0
+        def is_pos_legal(pos):
+            return bd.shape[0] > pos[0] >= 0 and bd.shape[1] > pos[1] >= 0
+        for f in move_funs:
+            pos_t = f(1,pos)
+            if is_pos_legal(pos_t) and bd[pos_t[0]][pos_t[1]] != Grid.GRID_EMP:
+                pscore += 1.0
+            pos_t = f(-1,pos)
+            if is_pos_legal(pos_t) and bd[pos_t[0]][pos_t[1]] != Grid.GRID_EMP:
+                pscore += 1.0
+        return pscore / 1.0 + 1.0
+        
 
     def search_child_move(self, move):
         for child in self.childrens:
@@ -59,14 +79,14 @@ class Node:
         elif self.won != game_utils.Termination.going:
             return self, False
         best = max(self.childrens, key=lambda child: \
-                    child.value/(child.visits+0.01)+self.mcts.c*np.sqrt( np.log(self.visits+1.1)/ (child.visits+0.01)))
+                    child.value/(child.visits+0.01)+self.mcts.c*child.p*np.sqrt( np.log(self.visits+1.1)/ (child.visits+0.01)))
         best.move_sim_board(self.sim_board)
         return best, False
 
     def expand(self):
         selected = self.unvisited[-1]
         self.unvisited.pop()
-        self.childrens.append(Node(self, selected, -self.role, self.sim_board,self.mcts))
+        self.childrens.append(Node(self, selected, -self.role, self.sim_board, self.mcts, self.p))
         return self.childrens[-1]
 
 
@@ -80,6 +100,8 @@ class MctsUct:
         self.c = 1.0
         self.last_best = None
         self.inherit = True
+        self.penelty = 0.5
+        self.fix_p = 1
     
     def set_inherit(self, inherit):
         self.inherit = inherit
@@ -121,20 +143,20 @@ class MctsUct:
                 continue
             if win_role == node.role:
                 node.value += 1
-            #else:
-                #node.value -= 1
+            else:
+                node.value -= self.penelty
             node.visits += 1
             node = node.parent
 
     def simulate(self, board):
         # print(board)
         if self.last_best is None or self.inherit:
-            root = Node(None, None, Grid.GRID_ENY, board.copy(), self)
+            root = Node(None, None, Grid.GRID_ENY, board.copy(), self, self.fix_p)
         else:
             enemy_move = np.where(self.last_best.sim_board != board)
             enemy_move = (enemy_move[0][0], enemy_move[1][0])
             root = self.last_best.search_child_move(enemy_move)
-            if root is None: root = Node(None, None, Grid.GRID_ENY, board.copy(), self)
+            if root is None: root = Node(None, None, Grid.GRID_ENY, board.copy(), self, self.fix_p)
             # else: print("Get ",enemy_move)
         win_cnt = 0
         tie_cnt = 0
