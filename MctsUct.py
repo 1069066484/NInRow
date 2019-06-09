@@ -163,7 +163,7 @@ class MctsUct:
         t_sim = 0
         for new_board in np.repeat(board.reshape((1,)+board.shape),self.max_acts,0):
             # print('\n')
-            if t_sim % 2000 == 0 and t_sim != 0:
+            if t_sim % (self.max_acts//5) == 0 and t_sim != 0:
                 print('win rate:', win_cnt/t_sim, '  tie rate=', tie_cnt/t_sim)
             t_sim += 1
             root.sim_board = new_board
@@ -183,7 +183,6 @@ class MctsUct:
         root = self.simulate(board.copy())
         root.sim_board = board.copy()
         best, _ = root.select()
-        # print(best.sim_board)
         self.last_best = best
         return best.move
 
