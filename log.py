@@ -6,6 +6,8 @@
 import logging
 import data_utils 
 from global_defs import *
+import sys
+
 
 
 def init_logger(name, fn):
@@ -22,4 +24,19 @@ def init_logger(name, fn):
     return logger
 
 
-logger = init_logger
+
+class Logger(object):
+    def __init__(self, file=None, console=True):
+        self.terminal = sys.stdout
+        self.file = None if file is None else open(file, "w")
+        self.console = console
+
+    def log(self, *message):
+        message = (' '.join([str(m) for m in message])) + '\n'
+        if self.console:
+            self.terminal.write(message)
+        if self.file is not None:
+            self.file.write(message)
+ 
+    def flush(self):
+        pass

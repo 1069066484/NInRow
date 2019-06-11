@@ -20,7 +20,7 @@ def main_exe():
     parser.add_argument("-p2", "--player2", help="role of player1: 0 for AI or 1 for human", type=int, required=True)
     parser.add_argument("-d1", "--difficulty1", help="difficulty of AI1, ranging from 1000-INF, work only if player1 is AI",
                         type=int, default=20000)
-    parser.add_argument("-d2", "--difficulty2", help="difficulty of AI1, ranging from 1000-INF, work only if player2 is AI",
+    parser.add_argument("-d2", "--difficulty2", help="difficulty of AI2, ranging from 1000-INF, work only if player2 is AI",
                         type=int, default=20000)
     args, _ = parser.parse_known_args(sys.argv[1:])
     game = Game(5,5,4,Game.Player(args.player1),Game.Player(args.player2))
@@ -31,10 +31,8 @@ def main_exe():
 
 
 def main_debug():
-    game = Game(5,5,4,Game.Player.AI,Game.Player.human)
-    game.players[0].set_strength(10000)
-    game.players[0].mcts.fix_p = True
-    game.players[1].set_strength(1000)
+    game = Game(6,6,4,Game.Player.AI,Game.Player.human)
+    game.players[0].mcts.max_acts = 1000
     game.start(graphics=True)
 
 

@@ -188,10 +188,11 @@ class ZeroNN:
         """
         return whether use new parameters
         """
-        if self.path is not None and exists(join(self.path, '0.meta')):
+        path_meta = join(self.path, '0.meta')
+        if self.path is not None and exists(path_meta):
             tf.reset_default_graph()
             sess = tf.Session()
-            self.saver = tf.train.import_meta_graph(join(self.path, '0.meta'))
+            self.saver = tf.train.import_meta_graph(path_meta)
             self.logger.log("Find the meta in file", self.path)
         else:
             self.logger.log("Init new meta")
@@ -211,10 +212,11 @@ class ZeroNN:
 
     def train(self):
         sess = self.sess
-        if self.path is not None:
-            self.saver.save(sess, join(self.path, '0'), write_meta_graph=True)
         self.curr_tr_batch_idx = 0
-        it_pep = round(self.X.shape[0] / self.batch_size * self.verbose)
+        it_pep = round(self.X.shape[0] / self.batch_size)
+        if self.path is not None:
+            self.saver.save(sess, self.path + '/0', write_meta_graph=True)
+        it_epoch = 0
         x_t = self.ts['x']
         kp_t = self.ts['kp']
         y_value_t = self.ts['y_value']
@@ -234,7 +236,8 @@ class ZeroNN:
                       else self.run_eval(self.X_te, self.Y_policy_te, self.Y_value_te)
                 self.train_hists.append([global_step//it_pep] + train_eval)
                 self.test_hists.append([global_step//it_pep] + test_eval)
-                if self.verbose is not None:
+                it_epoch += 1
+                if self.verbose is not None and it_epoch % self.verbose == 0:
                     self.logger.log('\nglobal_step:',global_step, '  epoch:',global_step//it_pep,
                           '\n   items:        [loss_policy,       loss_value,           loss_total,            acc_value]:',
                           '\n   train_eval: ',train_eval, 
@@ -242,6 +245,8 @@ class ZeroNN:
                 if self.path is not None:
                     self.saver.save(sess, self.path + '/model', global_step=global_step_t, write_meta_graph=False)
                     self.save_hists()
+        if self.path is not None:
+            self.saver.save(sess, self.path + '/0', write_meta_graph=True)
 
     def init_hists(self, refresh_saving):
         if refresh_saving:
@@ -263,7 +268,7 @@ class ZeroNN:
 
     def predict(self, X):
         if self.sess is None:
-            if not self.init_sess(False):
+            if not self.init_sess(refresh_saving=False):
                 raise Exception("Error: trying to predict without trained network")
         pred_value, pred_policy = self.sess.run([self.ts['pred_value'], self.ts['pred_policy']], 
                              feed_dict={self.ts['x']: X, self.ts['kp']: 1.0, self.ts['is_train']: False})
@@ -274,12 +279,13 @@ def main_sim_train():
     num_samples = 5000
     rows = 6
     cols = 6
-    hist = 3
-    X = np.random.rand(num_samples,rows,cols, hist)
+    channel = 4
+    X = np.random.rand(num_samples,rows,cols, channel)
     Y_value = np.random.randint(0,2,[num_samples,1], dtype=np.int8)
     Y_policy = np.random.rand(num_samples,rows*cols)
     clf = ZeroNN(verbose=2, path='ZeroNN')
-    clf.fit(X, Y_policy, Y_value, 0.1)
+    # clf.fit(X, Y_policy, Y_value, 0.1)
+    print(X[:2].shape)
     pred_value, pred_policy = clf.predict(X[:2])
     print(pred_value, pred_policy)
 

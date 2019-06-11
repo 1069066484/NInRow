@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
 """
 @Author: Zhixin Ling
-@Description: Part of the NinRowAI: MCTS of UCT algorithm's implementation, class encapulated.
-11/06/2019: class MctsUct is no longer maintained
+@Description: Part of the NinRowAI: MCTS of PUCT algorithm's implementation. Difference between UCT and PUCT is that
+        PUCT uses a P as prior when selecting a child node.
+        The important differences can be seen in function the Node::select.
 """
-
-
 import numpy as np
 from enum import IntEnum
 import game_utils
+from ZeroNN import ZeroNN
+#from CNN import CNN
 
 
 class Grid(IntEnum):
@@ -29,27 +30,8 @@ class Node:
         self.childrens = []
         self.avails = self.init_avails() #empty grids
         self.unvisited = self.avails.copy()
-        self.p = p if isinstance(p, int) else self.auto_p()
-
-    def auto_p(self):
-        move_funs = game_utils.move_funs
-        bd = self.sim_board
-        pscore = 1.0
-        pos = self.move
-        if pos is None:
-            return 1.0
-        def is_pos_legal(pos):
-            return bd.shape[0] > pos[0] >= 0 and bd.shape[1] > pos[1] >= 0
-        for f in move_funs:
-            pos_t = f(1,pos)
-            if is_pos_legal(pos_t) and bd[pos_t[0]][pos_t[1]] != Grid.GRID_EMP:
-                pscore += 1.0
-            pos_t = f(-1,pos)
-            if is_pos_legal(pos_t) and bd[pos_t[0]][pos_t[1]] != Grid.GRID_EMP:
-                pscore += 1.0
-        return pscore / 1.0 + 1.0
+        self.p = p 
         
-
     def search_child_move(self, move):
         for child in self.childrens:
             if child.move == move:
@@ -75,25 +57,38 @@ class Node:
 
     def select(self):
         # return whether expanded
-        if len(self.unvisited) != 0:
-            return self.expand(), True
-        elif self.won != game_utils.Termination.going:
+        if self.won != game_utils.Termination.going:
             return self, False
+        elif len(self.childrens) == 0:
+            self.expand()
+            return self, True
         best = max(self.childrens, key=lambda child: \
-                    child.value/(child.visits+0.01)+self.mcts.c*child.p*np.sqrt( np.log(self.visits+1.1)/ (child.visits+0.01)))
+                    child.value/(child.visits+0.01)+        # Q
+                   self.mcts.c*child.p*np.sqrt(self.visits)/ (child.visits+1.0))    # U
         best.move_sim_board(self.sim_board)
         return best, False
 
+    def create_eval_board(self):
+        eval_board = np.zeros(shape=[self.sim_board.shape[0],self.sim_board.shape[1], 4], dtype=np.int8)
+        eval_board[:,:,0][self.sim_board==Grid.GRID_SEL] = 1
+        eval_board[:,:,1][self.sim_board==Grid.GRID_ENY] = 1
+        if self.move is not None:
+            eval_board[:,:,2][self.move[0]][self.move[1]] = 1
+        eval_board[:,:,3][:,:] = self.role == Grid.GRID_SEL
+        return eval_board
+
     def expand(self):
-        selected = self.unvisited[-1]
-        self.unvisited.pop()
-        self.childrens.append(Node(self, selected, -self.role, self.sim_board, self.mcts, self.p))
-        return self.childrens[-1]
+        """
+        We expand all children
+        """
+        self.value, probs = self.mcts.eval_state(self.create_eval_board())
+        for r,c in self.avails:
+            self.childrens.append(Node(self, (r,c), -self.role, self.sim_board.copy(), self.mcts, probs[r][c]))
 
 
 class MctsUct:
     def __init__(self, board_rows_, board_cols_, n_target_=5, max_t_=5,
-                 max_acts_=1000, c=1.5,inherit=True,penelty=0.5,fix_p=1):
+                 max_acts_=1000, c=1.0,inherit=True,penelty=0.5,fix_p=1, zeroNN=ZeroNN(verbose=None, path='ZeroNN')):
         self.n_target = n_target_
         self.max_t = max_t_
         self.max_acts = max_acts_
@@ -104,6 +99,7 @@ class MctsUct:
         self.inherit = inherit
         self.penelty = penelty
         self.fix_p = fix_p
+        self.zeroNN = zeroNN
 
     def from_another_mcts(self, other):
         self.max_t = other.max_t
@@ -124,6 +120,9 @@ class MctsUct:
         return selected
 
     def default_policy(self, node):
+        """
+        MctsPuct does not use default_policy according to alphaGo Zero
+        """
         bd = node.sim_board
         avails = node.avails
         np.random.shuffle(avails)
@@ -140,21 +139,18 @@ class MctsUct:
     def check_over(self, bd, pos):
         return game_utils.Game.check_over_full(bd, pos, self.n_target)
 
-    def backup(self, node, win_role):
+    def backup(self, node, win_rate):
+        """
+        If win_role is GRID_SEL, win_rate should have the same sign as GRID_SEL
+        If win_role is GRID_ENY, win_rate should have the same sign as GRID_ENY
+        The trick can simplify the backup process
+        """
         while node.parent != None:
-            if win_role is None:
-                node.visits += 1
-                node = node.parent
-                continue
-            if win_role == node.role:
-                node.value += 1
-            else:
-                node.value -= self.penelty
+            node.value += node.role * win_rate
             node.visits += 1
             node = node.parent
 
     def simulate(self, board):
-        # print(board)
         if self.last_best is None or self.inherit:
             root = Node(None, None, Grid.GRID_ENY, board.copy(), self, self.fix_p)
         else:
@@ -162,7 +158,6 @@ class MctsUct:
             enemy_move = (enemy_move[0][0], enemy_move[1][0])
             root = self.last_best.search_child_move(enemy_move)
             if root is None: root = Node(None, None, Grid.GRID_ENY, board.copy(), self, self.fix_p)
-            # else: print("Get ",enemy_move)
         win_cnt = 0
         tie_cnt = 0
         t_sim = 0
@@ -176,12 +171,9 @@ class MctsUct:
             if leaf.won != game_utils.Termination.going:
                 win_cnt += (leaf.role == Grid.GRID_SEL and leaf.won == game_utils.Termination.won)
                 tie_cnt += leaf.won == game_utils.Termination.tie
-                self.backup(leaf, None if leaf.won == game_utils.Termination.tie else leaf.role)
+                self.backup(leaf, 0.0 if leaf.won == game_utils.Termination.tie else leaf.value)
                 continue
-            win_role = self.default_policy(leaf)
-            if win_role != 0:
-                self.backup(leaf, win_role)
-                win_cnt += (win_role == Grid.GRID_SEL)
+            # No default policy
         return root
 
     def select_action(self, board):
@@ -191,4 +183,14 @@ class MctsUct:
         self.last_best = best
         return best.move
 
+    def eval_state(self, board):
+        """
+        Input board is a 4*board_rows*board_rows matrix
+        Use NN to evaluate the current game state, return a double-element list [value, policy]
+            value is a scalar while policy is a board_rows*board_cols matrix
+        """
+        value, policy = self.zeroNN.predict(board.reshape([1]+list(board.shape)))
+        return value[0][0], policy.reshape([-1] + list(board.shape[:-1]))[0]
+        return [np.random.rand(), np.random.rand(self.board_rows, self.board_cols)]
+        return [0.0, np.zeros(self.board_rows, self.board_cols)]
 

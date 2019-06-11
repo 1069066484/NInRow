@@ -42,7 +42,7 @@ class CNN:
                 return net
             net = slim.flatten(net)
             for idx, param in enumerate(self.fcs):
-                net = slim.fully_connected(net, param, scope='fc' + str(idx))
+                net = slim.fully_connected(net, param, scope=scope_prefix+'fc' + str(idx))
                 net = slim.dropout(net, keep_prob=keep_prob)
             return net
 
