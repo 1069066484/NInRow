@@ -8,16 +8,25 @@ import tensorflow as tf
 import tensorflow.contrib.slim as slim
 import numpy as np
 from tensorflow.python.ops import control_flow_ops
+from sklearn.metrics import *
+from data_utils import *
+from global_defs import *
+from CNN import CNN
+import log
 
 
 class ZeroNN:
-    def __init__(self, cnns=[[16,5],2,[32,5],2], 
-                 fcs=[1024], kp=0.5, lr_init=0.05, 
-                 lr_dec_rate=0.95, batch_size=128,
-                 epoch=10, verbose=False, act=tf.nn.relu,
-                 l2=5e-8):
-        self.cnns = cnns
-        self.fcs = fcs
+    def __init__(self, common_cnn=CNN.Params([[16,5],2],None), 
+                 policy_cnn=CNN.Params([[16,3],2], [256]), 
+                 value_cnn=CNN.Params([[16,3],2], [256]), 
+                 kp=0.5, lr_init=0.05, lr_dec_rate=0.95, batch_size=256,
+                 epoch=10, verbose=None, act=tf.nn.relu, l2=1e-7, path=None):
+        """
+        verbose: set verbose an integer to output the training history or None not to output
+        """
+        self.common_cnn = common_cnn
+        self.policy_cnn = policy_cnn
+        self.value_cnn = value_cnn
         self.kp = kp
         self.lr_init = lr_init
         self.lr_dec_rate = lr_dec_rate
@@ -26,105 +35,258 @@ class ZeroNN:
         self.verbose = verbose
         self.act = act
         self.l2 = l2
+        self.path = None if path is None else mkdir(path)
+        self.logger = log.Logger(None if self.path is None else join(self.path, logfn('ZeroNN-' + curr_time_str())), 
+                                 verbose is not None)
+        self.sess = None
+        self.ts = {}
+        self.var_names = ['x','kp', 'y_value','y_policy', 'is_train', 
+        'loss_policy', 'loss_value', 'pred_value','acc_value', 
+        'pred_policy', 'loss_l2', 'loss_total', 'global_step','train_step']
+
+    def print_vars(self, graph=None, vars=True, ops=True):
+        if graph is None:
+            graph = tf.get_default_graph()
+        variable_names = tf.global_variables()
+        for name in variable_names:
+            print(name)
+        op = graph.get_operations()
+        for i in op:
+            print(i)
+
+    def init_vars(self):
+        for ts in self.var_names:
+                self.ts[ts] = tf.get_collection(ts)[0]
 
     def __str__(self):
-        return "ZNN-- cnns: {} \tfcs: {} \tkp: {} \tlr_init: {} \tlr_dec_rate: {} \tbatch_size: {} \tepoch: {} \tact: {}".format(
-            self.cnns, self.fcs, self.kp, self.lr_init, self.lr_dec_rate, self.batch_size, self.epoch, str(self.act).split(' ')[1] if self.act is not None else 'NONE'
-            )
+        return "ZeroNN-- common_cnns: {} \tfcs: {} \tkp: {} \tlr_init: {} \tlr_dec_rate: {} \tbatch_size: {} \tepoch: {} \tact: {}".format(
+            self.common_cnns, self.fcs, self.kp, self.lr_init, self.lr_dec_rate, self.batch_size, self.epoch, str(self.act).split(' ')[1] if self.act is not None else 'NONE')
 
-    def fit(self, X, Y):
-        self.Y_min = np.min(Y)
+    def init_training_data(self, X, Y_policy, Y_value, reserve_test):
+        if reserve_test is not None:
+            xy_tr, xy_te = labeled_data_split([X, Y_policy, Y_value], 1.0 - reserve_test)
+            X, Y_policy, Y_value = xy_tr
+            X_te, Y_policy_te, Y_value_te = xy_te
+            self.X_te = X_te
+            self.Y_policy_te =  Y_policy_te
+            # self.Y_policy_te = labels2one_hot(Y_policy_te)
+            self.Y_value_te = Y_value_te
+        else:
+            self.X_te = None
+            self.Y_policy_te = None
+            self.Y_value_te = None
         self.X = X
-        self.Y = labels2one_hot(Y)
+        self.Y_policy = Y_policy
+        # self.Y_policy = labels2one_hot(Y_policy)
+        self.Y_value = Y_value
+
+    def fit(self, X, Y_policy, Y_value, reserve_test=None, refresh_saving=False):
+        """
+        If you wanna extract test set automatically, set reserve_test the ratio for test set.
+        X should be a n*rows*cols*channels, where channels is number of histories.
+        """
+        self.init_training_data(X, Y_policy, Y_value, reserve_test)
         self.construct_model()
+        self.init_hists(refresh_saving)
+        self.init_sess(refresh_saving)
         self.train()
 
     def construct_model(self):
         tf.reset_default_graph()
-        n_xs, slen = self.X.shape
-        slen = int(round(np.sqrt(slen)))
-        n_labels = self.Y.shape[1]
-        x_raw = tf.placeholder(tf.float32, [None, slen*slen])
-        kp = tf.placeholder(tf.float32, [])
-        y = tf.placeholder(tf.float32, [None, n_labels])
-        x = tf.reshape(x_raw, [-1, slen, slen, 1])
-        is_train = tf.placeholder(tf.bool, [])
+        n_xs, rows, cols, channels = self.X.shape
+        n_labels_value = self.Y_value.shape[1]
+        n_labels_policy = self.Y_policy.shape[1]
+        x = tf.placeholder(tf.float32, [None, rows, cols, channels], name='x')
+        kp = tf.placeholder(tf.float32, [], name='kp')
+        y_value = tf.placeholder(tf.int8, [None, n_labels_value], name='y_value')
+        y_policy = tf.placeholder(tf.float32, [None, n_labels_policy], name='y_policy')
+        is_train = tf.placeholder(tf.bool, [], name='is_train')
+
+        # construct shared, policy and value networks: one way in, two ways out
         with slim.arg_scope([slim.conv2d, slim.fully_connected],
                     activation_fn=self.act,
                     normalizer_fn=tf.layers.batch_normalization,
                     normalizer_params={'training': is_train, 'momentum': 0.95},
                     weights_regularizer=slim.l2_regularizer(self.l2)):
-            conv_cnt = 1
-            pool_cnt = 1
-            net = x
-            for param in self.cnns:
-                if isinstance(param, int):
-                    net = slim.max_pool2d(net, [param,param], scope='pool' + str(pool_cnt))
-                    pool_cnt += 1
-                else:
-                    net = slim.conv2d(x, param[0], [param[1],param[1]], scope='conv' + str(conv_cnt))
-                    conv_cnt += 1
-            net = slim.flatten(net)
-            for idx, param in enumerate(self.fcs):
-                net = slim.fully_connected(net, param, scope='fc' + str(idx))
-                net = slim.dropout(net, keep_prob=kp)
-            logits = slim.fully_connected(net, n_labels, activation_fn=None, scope='logits')
-        corrects = tf.equal(tf.arg_max(logits,1),tf.argmax(y,1))
-        acc = tf.reduce_mean(tf.cast(corrects, tf.float32))
-        cross_entropy = tf.reduce_mean(
-            tf.nn.softmax_cross_entropy_with_logits_v2(labels=y, logits=logits))
-        regularization_loss = tf.add_n(slim.losses.get_regularization_losses())
+            output_common = self.common_cnn.construct(x, kp, "common_")
+            output_policy = self.policy_cnn.construct(output_common, kp, "policy_")
+            logits_policy = slim.fully_connected(output_policy, rows * cols, activation_fn=tf.nn.softmax, scope='logits_policy')
+            output_value = self.value_cnn.construct(output_common, kp, "value_")
+            logits_value = slim.fully_connected(output_value, 1, activation_fn=tf.nn.tanh, scope='logits_value')
+
+        # define loss and accuracies of value network
+        # actually value network return a scalar
+        loss_value = tf.losses.mean_squared_error(labels=y_value, predictions=logits_value, scope='loss_value')
+        # pred_value is actually the same as logits_value, we are using an alias
+        pred_value = tf.add_n([logits_value], name='pred_value')
+        # print(logits_value)
+        corrects_value = tf.equal(tf.cast(tf.round(pred_value), tf.int8),y_value)
+        acc_value = tf.reduce_mean(tf.cast(corrects_value, tf.float32),name='acc_value')
+
+        # define loss and accuracies of policy network
+        # tf.losses.softmax_cross_entropy() cannot be used for cross_entropy calculation since the labels are not ONE-HOT
+        loss_policy = tf.reduce_mean(-y_policy*tf.log(tf.clip_by_value(logits_policy,1e-10,1.0)), name='loss_policy')
+        pred_policy = tf.add_n([logits_policy], name='pred_policy')
+        
+        # regularization_loss = tf.add_n(tf.losses.get_regularization_losses, name='loss_l2') 
+        loss_l2 = tf.losses.get_regularization_loss(scope='loss_l2')
+        loss_total = tf.add_n([loss_policy, loss_value, loss_l2], name='loss_total')
         global_step = tf.get_variable("global_step", [], initializer=tf.constant_initializer(0.0), trainable=False)
+
+        # learning rate annealing
         lr = tf.train.exponential_decay(
-                self.lr_init,
-                global_step,
-                n_xs / self.batch_size, self.lr_dec_rate,
-                staircase=True)
+            self.lr_init,
+            global_step,
+            n_xs / self.batch_size, self.lr_dec_rate,
+            staircase=True)
         optimizer = tf.train.AdamOptimizer(learning_rate=lr)
-        train_step = slim.learning.create_train_op(cross_entropy + regularization_loss, optimizer, global_step=global_step)
+        train_step = slim.learning.create_train_op(
+            loss_total,  optimizer, global_step=global_step)
+        
+        # ensure batch normalization is done before forwarding
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
         if update_ops:
             updates = tf.group(*update_ops)
-            train_step = control_flow_ops.with_dependencies([updates], train_step)
-        self.x_t = x_raw
-        self.kp_t = kp
-        self.y_t = y
-        self.acc_t = acc
-        self.train_step_t = train_step
-        self.is_train_t = is_train
-        self.pred_t = tf.arg_max(logits,1)
-        self.global_step = global_step
+            train_step = control_flow_ops.with_dependencies([updates], train_step, name='train_step')
+        locs = locals()
+        for var in self.var_names:
+            tf.add_to_collection(var, locs[var])
 
     def next_batch(self):
         batch_sz = self.batch_size
         indices = list(range(self.curr_tr_batch_idx, self.curr_tr_batch_idx+batch_sz))
         self.curr_tr_batch_idx = (batch_sz + self.curr_tr_batch_idx) % self.X.shape[0]
         indices = [i%self.X.shape[0] for i in indices]
-        return [self.X[indices], self.Y[indices]]
+        return [self.X[indices], self.Y_policy[indices], self.Y_value[indices]]
+
+    def run_eval(self, X, Y_policy, Y_value):
+        loss_policy_sum = 0.0
+        loss_value_sum = 0.0
+        loss_total_sum = 0.0
+        acc_value_sum = 0.0
+        correct_preds_value = 0.0
+        feed_dict = {self.ts['kp']: 1.0, self.ts['is_train']: False}
+        for batch_idx in range(0,X.shape[0],self.batch_size):
+            batch_idx_next = min(X.shape[0], batch_idx + self.batch_size)
+            batch_xs = X[batch_idx:batch_idx_next]
+            batch_ys_policy = Y_policy[batch_idx:batch_idx_next]
+            batch_ys_value = Y_value[batch_idx:batch_idx_next]
+            feed_dict.update({self.ts['x']: batch_xs, self.ts['y_value']: batch_ys_value, self.ts['y_policy']: batch_ys_policy})
+            [loss_policy, loss_value, loss_total, acc_value] = self.sess.run(
+                [self.ts['loss_policy'], self.ts['loss_value'], self.ts['loss_total'], self.ts['acc_value']],feed_dict=feed_dict)
+            mult = batch_idx_next - batch_idx
+            loss_policy_sum += loss_policy * mult
+            loss_value_sum += loss_value * mult
+            loss_total_sum += loss_total * mult
+            acc_value_sum += acc_value * mult
+        return [loss_policy_sum / X.shape[0], 
+                loss_value_sum / X.shape[0], 
+                loss_total_sum / X.shape[0], 
+                acc_value_sum / X.shape[0]]
+
+    def init_sess(self, refresh_saving):
+        """
+        return whether use new parameters
+        """
+        if self.path is not None and exists(join(self.path, '0.meta')):
+            tf.reset_default_graph()
+            sess = tf.Session()
+            self.saver = tf.train.import_meta_graph(join(self.path, '0.meta'))
+            self.logger.log("Find the meta in file", self.path)
+        else:
+            self.logger.log("Init new meta")
+            self.saver = tf.train.Saver()
+            sess = tf.Session()
+            sess.run(tf.global_variables_initializer())
+        self.init_vars()
+        self.sess = sess
+        if not refresh_saving and self.path is not None: 
+            try: 
+                self.saver.restore(sess,tf.train.latest_checkpoint(self.path)) 
+                self.logger.log("Find the lastest check point in file", self.path)
+                return True
+            except: 
+                self.logger.log("Init new parameters")
+                return False
 
     def train(self):
-        sess = tf.Session()
-        sess.run(tf.global_variables_initializer())
+        sess = self.sess
+        if self.path is not None:
+            self.saver.save(sess, join(self.path, '0'), write_meta_graph=True)
         self.curr_tr_batch_idx = 0
-        it_pep = round(self.X.shape[0] / self.batch_size)
+        it_pep = round(self.X.shape[0] / self.batch_size * self.verbose)
+        x_t = self.ts['x']
+        kp_t = self.ts['kp']
+        y_value_t = self.ts['y_value']
+        y_policy_t = self.ts['y_policy']
+        is_train_t = self.ts['is_train']
+        train_step_t = self.ts['train_step']
+        global_step_t = self.ts['global_step']
         for i in range(round(self.epoch * self.X.shape[0] / self.batch_size)+1):
-            batch_xs, batch_ys = self.next_batch()
-            feed_dict = {self.x_t: batch_xs,
-                         self.kp_t: self.kp,
-                         self.y_t: batch_ys,
-                         self.is_train_t: True}
-            sess.run(self.train_step_t, feed_dict=feed_dict)
-            if self.verbose and sess.run(self.global_step, feed_dict=feed_dict) % it_pep == 0:
-                print("iteration",i, '  train_acc: ',sess.run(self.acc_t,feed_dict={
-                    self.x_t: batch_xs, self.kp_t: 1.0, self.is_train_t: False, self.y_t: batch_ys
-                    }))
-        self.sess = sess
+            batch_xs, batch_ys_policy, batch_ys_value = self.next_batch()
+            feed_dict = {x_t: batch_xs, kp_t: self.kp, y_value_t: batch_ys_value, y_policy_t: batch_ys_policy, is_train_t: True}
+            sess.run(train_step_t, feed_dict=feed_dict)
+            # global_step = sess.run(global_step_t, feed_dict=feed_dict)
+            if i % it_pep == 0:
+                global_step = sess.run(global_step_t, feed_dict=feed_dict)
+                train_eval = self.run_eval(self.X, self.Y_policy, self.Y_value)
+                test_eval = [-1.0 for i in range(4)] if self.X_te is None \
+                      else self.run_eval(self.X_te, self.Y_policy_te, self.Y_value_te)
+                self.train_hists.append([global_step//it_pep] + train_eval)
+                self.test_hists.append([global_step//it_pep] + test_eval)
+                if self.verbose is not None:
+                    self.logger.log('\nglobal_step:',global_step, '  epoch:',global_step//it_pep,
+                          '\n   items:        [loss_policy,       loss_value,           loss_total,            acc_value]:',
+                          '\n   train_eval: ',train_eval, 
+                          '\n   test_eval:',  test_eval)
+                if self.path is not None:
+                    self.saver.save(sess, self.path + '/model', global_step=global_step_t, write_meta_graph=False)
+                    self.save_hists()
+
+    def init_hists(self, refresh_saving):
+        if refresh_saving:
+            self.train_hists = []
+            self.test_hists = []
+            return None
+        path_train = join(self.path, npfn('train'))
+        path_test = join(self.path, npfn('test'))
+        self.train_hists = [] if not exists(path_train) else np.load(path_train).tolist()
+        self.test_hists = [] if not exists(path_test) else np.load(path_test).tolist()
+
+    def save_hists(self):
+        if not exists(self.path):
+            return
+        path_train = join(self.path, npfn('train'))
+        path_test = join(self.path, npfn('test'))
+        np.save(join(self.path, npfn('train')), np.array(self.train_hists))
+        np.save(join(self.path, npfn('test')), np.array(self.test_hists))
 
     def predict(self, X):
-        pred = self.sess.run(self.pred_t, feed_dict={self.x_t: X, self.kp_t: 1.0, self.is_train_t: False})
-        return pred + self.Y_min
+        if self.sess is None:
+            if not self.init_sess(False):
+                raise Exception("Error: trying to predict without trained network")
+        pred_value, pred_policy = self.sess.run([self.ts['pred_value'], self.ts['pred_policy']], 
+                             feed_dict={self.ts['x']: X, self.ts['kp']: 1.0, self.ts['is_train']: False})
+        return [pred_value, pred_policy]
+
+
+def main_sim_train():
+    num_samples = 5000
+    rows = 6
+    cols = 6
+    hist = 3
+    X = np.random.rand(num_samples,rows,cols, hist)
+    Y_value = np.random.randint(0,2,[num_samples,1], dtype=np.int8)
+    Y_policy = np.random.rand(num_samples,rows*cols)
+    clf = ZeroNN(verbose=2, path='ZeroNN')
+    clf.fit(X, Y_policy, Y_value, 0.1)
+    pred_value, pred_policy = clf.predict(X[:2])
+    print(pred_value, pred_policy)
+
 
 
 
 if __name__=='__main__':
-    pass
+    main_sim_train()
+
+
