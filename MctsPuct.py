@@ -17,6 +17,7 @@ class Grid(IntEnum):
     GRID_ENY = -1
     GRID_SEL = -GRID_ENY
 
+
 class Node:
     def __init__(self, parent=None, move=None, role=None, sim_board=None, mcts=None, p=1):
         self.visits = 0
@@ -69,13 +70,29 @@ class Node:
         return best, False
 
     def create_eval_board(self):
+        """
+        Four channels:
+            1. self pieces
+            2. opponent pieces
+            3. the node's movement(last movement)
+            4. current player to move
+        The board can be reversed in terms of the opponent's view
+        """
         eval_board = np.zeros(shape=[self.sim_board.shape[0],self.sim_board.shape[1], 4], dtype=np.int8)
-        eval_board[:,:,0][self.sim_board==Grid.GRID_SEL] = 1
-        eval_board[:,:,1][self.sim_board==Grid.GRID_ENY] = 1
+        eval_board[:,:,0][self.sim_board==self.role] = 1
+        eval_board[:,:,1][self.sim_board==-self.role] = 1
         if self.move is not None:
             eval_board[:,:,2][self.move[0]][self.move[1]] = 1
-        eval_board[:,:,3][:,:] = self.role == Grid.GRID_SEL
+
+        # at this node, the self.role has moved, so the current player to move is the oppenent
+        eval_board[:,:,3][:,:] = self.role != Grid.GRID_SEL
         return eval_board
+
+    def probs(self):
+        probs = np.zeros(self.sim_board.shape)
+        for child in self.childrens:
+            probs[child.move[0]][child.move[1]] = child.visits
+        return probs / self.visits
 
     def expand(self):
         """
@@ -86,9 +103,9 @@ class Node:
             self.childrens.append(Node(self, (r,c), -self.role, self.sim_board.copy(), self.mcts, probs[r][c]))
 
 
-class MctsUct:
+class MctsPuct:
     def __init__(self, board_rows_, board_cols_, n_target_=5, max_t_=5,
-                 max_acts_=1000, c=1.0,inherit=True,penelty=0.5,fix_p=1, zeroNN=ZeroNN(verbose=None, path='ZeroNN')):
+                 max_acts_=1000, c=4.0,inherit=True,penelty=0.5,fix_p=1, zeroNN=None):
         self.n_target = n_target_
         self.max_t = max_t_
         self.max_acts = max_acts_
@@ -97,18 +114,17 @@ class MctsUct:
         self.c = c
         self.last_best = None
         self.inherit = inherit
-        self.penelty = penelty
         self.fix_p = fix_p
         self.zeroNN = zeroNN
+        self.enemy_move = None
 
     def from_another_mcts(self, other):
         self.max_t = other.max_t
         self.max_acts = other.max_acts
         self.c = other.c
-        self.last_best = other.last_best
         self.inherit = other.inherit
-        self.penelty = other.penelty
         self.fix_p = other.fix_p
+        self.zeroNN = other.zeroNN
 
     def tree_policy(self, root):
         expanded = False
@@ -145,19 +161,18 @@ class MctsUct:
         If win_role is GRID_ENY, win_rate should have the same sign as GRID_ENY
         The trick can simplify the backup process
         """
-        while node.parent != None:
+        while node != None:
             node.value += node.role * win_rate
             node.visits += 1
             node = node.parent
 
     def simulate(self, board):
+        enemy_move = self.enemy_move
         if self.last_best is None or self.inherit:
-            root = Node(None, None, Grid.GRID_ENY, board.copy(), self, self.fix_p)
+            root = Node(None, enemy_move, Grid.GRID_ENY, board.copy(), self, self.fix_p)
         else:
-            enemy_move = np.where(self.last_best.sim_board != board)
-            enemy_move = (enemy_move[0][0], enemy_move[1][0])
             root = self.last_best.search_child_move(enemy_move)
-            if root is None: root = Node(None, None, Grid.GRID_ENY, board.copy(), self, self.fix_p)
+            if root is None: root = Node(None, enemy_move, Grid.GRID_ENY, board.copy(), self, self.fix_p)
         win_cnt = 0
         tie_cnt = 0
         t_sim = 0
@@ -172,16 +187,22 @@ class MctsUct:
                 win_cnt += (leaf.role == Grid.GRID_SEL and leaf.won == game_utils.Termination.won)
                 tie_cnt += leaf.won == game_utils.Termination.tie
                 self.backup(leaf, 0.0 if leaf.won == game_utils.Termination.tie else leaf.value)
-                continue
             # No default policy
         return root
 
+    def probs_board(self):
+        return [self.root.probs(), self.root.create_eval_board()]
+
     def select_action(self, board):
-        root = self.simulate(board.copy())
-        root.sim_board = board.copy()
-        best, _ = root.select()
+        self.root = self.simulate(board.copy())
+        self.root.sim_board = board.copy()
+        best, _ = self.root.select()
+        self.root.sim_board = board.copy()
         self.last_best = best
         return best.move
+
+    def probs_board(self):
+        return [self.root.probs(), self.root.create_eval_board()]
 
     def eval_state(self, board):
         """
@@ -191,6 +212,4 @@ class MctsUct:
         """
         value, policy = self.zeroNN.predict(board.reshape([1]+list(board.shape)))
         return value[0][0], policy.reshape([-1] + list(board.shape[:-1]))[0]
-        return [np.random.rand(), np.random.rand(self.board_rows, self.board_cols)]
-        return [0.0, np.zeros(self.board_rows, self.board_cols)]
 

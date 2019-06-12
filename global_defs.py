@@ -17,12 +17,8 @@ def mkdir(dir):
     return dir
 
 
-
-
 FOLDER_LOGS = mkdir('logs')
-
-
-
+FOLDER_ZERO_NNS = mkdir('zero_nns')
 
 
 if __name__=='__main__':

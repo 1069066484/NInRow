@@ -31,6 +31,19 @@ class Node:
         self.unvisited = self.avails.copy()
         self.p = p if isinstance(p, int) else self.auto_p()
 
+    def moves(self):
+        if self.parent is None:
+            print(self.role, self.move)
+            return 
+        self.parent.moves()
+        print(self.role, self.move)
+
+    def probs(self):
+        probs = np.zeros(self.sim_board.shape)
+        for child in self.childrens:
+            probs[child.move[0]][child.move[1]] = child.visits
+        return probs / self.visits
+
     def auto_p(self):
         move_funs = game_utils.move_funs
         bd = self.sim_board
@@ -84,16 +97,41 @@ class Node:
         best.move_sim_board(self.sim_board)
         return best, False
 
+    def create_eval_board(self):
+        """
+        Four channels:
+            1. self pieces
+            2. opponent pieces
+            3. the node's movement(last movement)
+            4. current player to move
+        The board can be reversed in terms of the opponent's view
+        """
+        eval_board = np.zeros(shape=[self.sim_board.shape[0],self.sim_board.shape[1], 4], dtype=np.int8)
+        eval_board[:,:,0][self.sim_board==self.role] = 1
+        eval_board[:,:,1][self.sim_board==-self.role] = 1
+        if self.move is not None:
+            eval_board[:,:,2][self.move[0]][self.move[1]] = 1
+
+        # at this node, the self.role has moved, so the current player to move is the oppenent
+        eval_board[:,:,3] = self.role != Grid.GRID_SEL
+        return eval_board
+
+    def probs(self):
+        probs = np.zeros(self.sim_board.shape)
+        for child in self.childrens:
+            probs[child.move[0]][child.move[1]] = child.visits
+        return probs / self.visits
+
     def expand(self):
         selected = self.unvisited[-1]
         self.unvisited.pop()
-        self.childrens.append(Node(self, selected, -self.role, self.sim_board, self.mcts, self.p))
+        self.childrens.append(Node(self, selected, -self.role, self.sim_board.copy(), self.mcts, self.p))
         return self.childrens[-1]
 
 
 class MctsUct:
     def __init__(self, board_rows_, board_cols_, n_target_=5, max_t_=5,
-                 max_acts_=1000, c=1.5,inherit=True,penelty=0.5,fix_p=1):
+                 max_acts_=1000, c=0.2,inherit=True,penelty=0.5,fix_p=1):
         self.n_target = n_target_
         self.max_t = max_t_
         self.max_acts = max_acts_
@@ -104,6 +142,7 @@ class MctsUct:
         self.inherit = inherit
         self.penelty = penelty
         self.fix_p = fix_p
+        self.enemy_move = None
 
     def from_another_mcts(self, other):
         self.max_t = other.max_t
@@ -141,7 +180,7 @@ class MctsUct:
         return game_utils.Game.check_over_full(bd, pos, self.n_target)
 
     def backup(self, node, win_role):
-        while node.parent != None:
+        while node != None:
             if win_role is None:
                 node.visits += 1
                 node = node.parent
@@ -155,13 +194,12 @@ class MctsUct:
 
     def simulate(self, board):
         # print(board)
-        if self.last_best is None or self.inherit:
-            root = Node(None, None, Grid.GRID_ENY, board.copy(), self, self.fix_p)
+        if self.last_best is None or (not self.inherit):
+            root = Node(None, self.enemy_move, Grid.GRID_ENY, board.copy(), self, self.fix_p)
         else:
-            enemy_move = np.where(self.last_best.sim_board != board)
-            enemy_move = (enemy_move[0][0], enemy_move[1][0])
+            enemy_move = self.enemy_move
             root = self.last_best.search_child_move(enemy_move)
-            if root is None: root = Node(None, None, Grid.GRID_ENY, board.copy(), self, self.fix_p)
+            if root is None: root = Node(None, self.enemy_move, Grid.GRID_ENY, board.copy(), self, self.fix_p)
             # else: print("Get ",enemy_move)
         win_cnt = 0
         tie_cnt = 0
@@ -184,10 +222,14 @@ class MctsUct:
                 win_cnt += (win_role == Grid.GRID_SEL)
         return root
 
+    def probs_board(self):
+        return [self.root.probs(), self.root.create_eval_board()]
+
     def select_action(self, board):
-        root = self.simulate(board.copy())
-        root.sim_board = board.copy()
-        best, _ = root.select()
+        self.root = self.simulate(board.copy())
+        self.root.sim_board = board.copy()
+        best, _ = self.root.select()
+        self.root.sim_board = board.copy()
         self.last_best = best
         return best.move
 

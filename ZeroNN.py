@@ -13,14 +13,17 @@ from data_utils import *
 from global_defs import *
 from CNN import CNN
 import log
+import copy
+
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"]='3'
 
 
 class ZeroNN:
-    def __init__(self, common_cnn=CNN.Params([[16,5],2],None), 
-                 policy_cnn=CNN.Params([[16,3],2], [256]), 
-                 value_cnn=CNN.Params([[16,3],2], [256]), 
-                 kp=0.5, lr_init=0.05, lr_dec_rate=0.95, batch_size=256,
-                 epoch=10, verbose=None, act=tf.nn.relu, l2=1e-7, path=None):
+    def __init__(self, common_cnn=CNN.Params([[32,3],[64,3],[128,3]],None), 
+                 policy_cnn=CNN.Params([[4,1]], []), value_cnn=CNN.Params([[2,1],2], [128]), 
+                 kp=0.5, lr_init=0.05, lr_dec_rate=0.95, batch_size=256, ckpt_idx=-2,
+                 epoch=10, verbose=None, act=tf.nn.relu, l2=1e-7, path=None, lock_model_path=None):
         """
         verbose: set verbose an integer to output the training history or None not to output
         """
@@ -33,6 +36,7 @@ class ZeroNN:
         self.batch_size = batch_size
         self.epoch = epoch
         self.verbose = verbose
+        self.lock_model_path = lock_model_path
         self.act = act
         self.l2 = l2
         self.path = None if path is None else mkdir(path)
@@ -40,9 +44,11 @@ class ZeroNN:
                                  verbose is not None)
         self.sess = None
         self.ts = {}
+        self.ckpt_idx = ckpt_idx
         self.var_names = ['x','kp', 'y_value','y_policy', 'is_train', 
         'loss_policy', 'loss_value', 'pred_value','acc_value', 
         'pred_policy', 'loss_l2', 'loss_total', 'global_step','train_step']
+        self.trained_model_paths = []
 
     def print_vars(self, graph=None, vars=True, ops=True):
         if graph is None:
@@ -93,10 +99,12 @@ class ZeroNN:
 
     def construct_model(self):
         tf.reset_default_graph()
+        
         n_xs, rows, cols, channels = self.X.shape
         n_labels_value = self.Y_value.shape[1]
         n_labels_policy = self.Y_policy.shape[1]
         x = tf.placeholder(tf.float32, [None, rows, cols, channels], name='x')
+        x_trans = tf.image.flip_up_down(tf.image.flip_left_right(x))
         kp = tf.placeholder(tf.float32, [], name='kp')
         y_value = tf.placeholder(tf.int8, [None, n_labels_value], name='y_value')
         y_policy = tf.placeholder(tf.float32, [None, n_labels_policy], name='y_policy')
@@ -108,7 +116,7 @@ class ZeroNN:
                     normalizer_fn=tf.layers.batch_normalization,
                     normalizer_params={'training': is_train, 'momentum': 0.95},
                     weights_regularizer=slim.l2_regularizer(self.l2)):
-            output_common = self.common_cnn.construct(x, kp, "common_")
+            output_common = self.common_cnn.construct(x_trans, kp, "common_")
             output_policy = self.policy_cnn.construct(output_common, kp, "policy_")
             logits_policy = slim.fully_connected(output_policy, rows * cols, activation_fn=tf.nn.softmax, scope='logits_policy')
             output_value = self.value_cnn.construct(output_common, kp, "value_")
@@ -196,16 +204,25 @@ class ZeroNN:
             self.logger.log("Find the meta in file", self.path)
         else:
             self.logger.log("Init new meta")
-            self.saver = tf.train.Saver()
+            self.saver = tf.train.Saver(max_to_keep=1000)
             sess = tf.Session()
             sess.run(tf.global_variables_initializer())
         self.init_vars()
         self.sess = sess
         if not refresh_saving and self.path is not None: 
             try: 
-                self.saver.restore(sess,tf.train.latest_checkpoint(self.path)) 
-                self.logger.log("Find the lastest check point in file", self.path)
-                return True
+                if isinstance(self.ckpt_idx, str):
+                    self.saver.restore(sess,self.ckpt_idx) 
+                    self.logger.log("Find the check point ",self.ckpt_idx," in file", self.path)
+                    return True
+                
+                ckpt = tf.train.get_checkpoint_state(self.path)
+                if ckpt and ckpt.all_model_checkpoint_paths:
+                    # print(ckpt.all_model_checkpoint_paths[self.ckpt_idx])
+                    self.ckpt_path = ckpt.all_model_checkpoint_paths[self.ckpt_idx]
+                    self.saver.restore(sess,ckpt.all_model_checkpoint_paths[self.ckpt_idx]) 
+                    self.logger.log("Find the check point ",self.ckpt_idx," in file", self.path)
+                    return True
             except: 
                 self.logger.log("Init new parameters")
                 return False
@@ -243,10 +260,16 @@ class ZeroNN:
                           '\n   train_eval: ',train_eval, 
                           '\n   test_eval:',  test_eval)
                 if self.path is not None:
-                    self.saver.save(sess, self.path + '/model', global_step=global_step_t, write_meta_graph=False)
+                    path = self.saver.save(sess, self.path + '/model.ckpt', global_step=global_step_t, write_meta_graph=False)
+                    # print(path)
+                    if self.lock_model_path is not None:
+                        lock_model_path.acquire()
+                    self.trained_model_paths.append(path)
+                    if self.lock_model_path is not None:
+                        lock_model_path.release()
                     self.save_hists()
-        if self.path is not None:
-            self.saver.save(sess, self.path + '/0', write_meta_graph=True)
+        #if self.path is not None:
+        #    self.saver.save(sess, self.path + '/0', write_meta_graph=True)
 
     def init_hists(self, refresh_saving):
         if refresh_saving:
@@ -277,22 +300,33 @@ class ZeroNN:
 
 def main_sim_train():
     num_samples = 5000
-    rows = 6
-    cols = 6
+    rows = 5
+    cols = 5
     channel = 4
     X = np.random.rand(num_samples,rows,cols, channel)
     Y_value = np.random.randint(0,2,[num_samples,1], dtype=np.int8)
     Y_policy = np.random.rand(num_samples,rows*cols)
-    clf = ZeroNN(verbose=2, path='ZeroNN')
-    # clf.fit(X, Y_policy, Y_value, 0.1)
+    clf = ZeroNN(verbose=2, path='ZeroNN', ckpt_idx='ZeroNN/model.ckpt-309')
+    clf.fit(X, Y_policy, Y_value, 0.1)
     print(X[:2].shape)
     pred_value, pred_policy = clf.predict(X[:2])
     print(pred_value, pred_policy)
 
 
-
+def _test_flip():
+    data = np.random.randint(0,2,[2,3,3,2], dtype=np.int8)
+    x = tf.convert_to_tensor(data)
+    print(data[0][:,:,0])
+    print(data[1][:,:,1])
+    with tf.Session() as sess:
+        flipped0 = tf.image.flip_up_down(x)
+        data = flipped0.eval()
+        print(data[0][:,:,0])
+        print(data[1][:,:,1])
 
 if __name__=='__main__':
     main_sim_train()
+
+
 
 

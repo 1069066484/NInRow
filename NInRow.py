@@ -31,10 +31,61 @@ def main_exe():
 
 
 def main_debug():
-    game = Game(6,6,4,Game.Player.AI,Game.Player.human)
+    game = Game(3,3,3,Game.Player.AI,Game.Player.AI,collect_ai_hists=True)
     game.players[0].mcts.max_acts = 1000
+    game.players[1].mcts.max_acts = 100
     game.start(graphics=True)
+    probs, eval_board, winner = game.ai_hists()
+    for i in range(3):
+        print(probs[i])
+        print(eval_board[i][:,:,0])
+        print(eval_board[i][:,:,1])
+        print(eval_board[i][:,:,2])
+        print(eval_board[i][:,:,3])
+        print('\n\n')
+    print(np.array(probs).shape)
+    print(np.array(eval_board).shape)
+    print(winner)
+
+
+def reversed_eval_board(board):
+    board_new = board.copy()
+    # the oppenent is the next to move
+    board_new[:,:,3] = 1 - board[:,:,3]
+    # swap the player to move
+    board_new[:,:,0] = board[:,:,1]
+    board_new[:,:,1] = board[:,:,0]
+    return board_new
+
+def hists2enhanced_train_data(ai_hists):
+    X = []
+    Y_policy = []
+    Y_value = []
+    for hist in ai_hists:
+        for i in range(len(hist[0])):
+            X.append(hist[1][i])
+            Y_policy.append(hist[0][i])
+            Y_value.append([0 if hist[2] is None else int(hist[2] == i % 2)])
+
+            X.append(reversed_eval_board(hist[1][i]))
+            Y_policy.append(hist[0][i])
+            Y_value.append([0 if hist[2] is None else int(hist[2] != i % 2)])
+    return [np.array(X, dtype=np.int8), np.array(Y_policy), np.array(Y_value)]
+
+
+def hists_test():
+    mcts1 = Mcts(0,0,0)
+    mcts2 = Mcts(0,0,0)
+    player1_winprob, player2_winprob, tie_rate, hists = eval_mcts(3,3,3,mcts1,mcts2,sim_times=1, verbose=False, collect_ai_hists=True)
+    hists = hists2enhanced_train_data(hists)
+    print(hists[0].shape, hists[1].shape, hists[2].shape)
 
 
 if __name__=='__main__':
-    main_debug()
+    hists_test()
+    """
+    hists[i] is history of one single game
+        hists[i][0]: a list of r*c arrays indicating probs
+        hists[i][1]: a list of r*c*4 arrays indicating eval boards
+        hists[i][2]: the win role
+    """
