@@ -19,114 +19,92 @@ def inherit_test():
     inherit2 = False
     mcts1 = Mcts(0,0,0,5,200,inherit=inherit1)
     mcts2 = Mcts(0,0,0,5,200,inherit=inherit2)
-    player1_winprob, player2_winprob = eval_mcts(5,5,4,mcts1,mcts2,sim_times=150, verbose=False)
+    player1_winprob, player2_winprob, _, _ = eval_mcts(5,5,4,mcts1,mcts2,sim_times=200, verbose=False)
     print('\ninherit:',inherit1,inherit2,'\n',
             ' w:    ', player1_winprob,player2_winprob)
 """
 MctsUct
 inherit: True False
-  w:     0.87 0.12
+  w:     0.5325 0.44
 """
 
 
 def c_test():
-    c1 = 2.0
-    for c2 in [4.0,2.5,1.5,1.0,0.5]:
+    c1 = 0.2
+    for c2 in [0.5,0.2,0.1]:
         mcts1 = Mcts(0,0,0,5,200,c=c1)
         mcts2 = Mcts(0,0,0,5,200,c=c2)
-        player1_winprob, player2_winprob = eval_mcts(5,5,4,mcts1,mcts2,sim_times=50, verbose=False)
+        player1_winprob, player2_winprob, _, _ = eval_mcts(5,5,4,mcts1,mcts2,sim_times=50, verbose=False)
         print('\nc:',mcts1.c, mcts2.c,'\n',
               'w:', player1_winprob,player2_winprob)
 """
 MctsUct
-c: 1.0 10.0
- w: 0.88 0.11
-
-c: 1.0 5.0
- w: 0.74 0.25
-
-c: 1.0 2.0
- w: 0.42 0.53
-
-c: 1.0 0.5
- w: 0.47 0.49
-
-c: 1.0 0.1
- w: 0.48 0.47
-
- 
 c: 2.0 4.0
- w: 0.67 0.31
+ w: 0.71 0.28
 
 c: 2.0 2.5
- w: 0.57 0.41
+ w: 0.52 0.48
 
 c: 2.0 1.5
- w: 0.47 0.5
+ w: 0.35 0.64
 
 c: 2.0 1.0
- w: 0.44 0.52
+ w: 0.25 0.75
 
 c: 2.0 0.5
- w: 0.45 0.53
-"""
+ w: 0.06 0.92
 
-def penelty_test():
-    penelty1 = 0.0
-    for penelty2 in [0.0,0.2,0.5]:
-        mcts1 = Mcts(0,0,0,5,200,penelty=penelty1)
-        mcts2 = Mcts(0,0,0,5,200,penelty=penelty2)
-        player1_winprob, player2_winprob = eval_mcts(5,5,4,mcts1,mcts2,sim_times=500, verbose=False)
-        print('\nc:',mcts1.penelty, mcts2.penelty,'\n',
-              'w:', player1_winprob,player2_winprob)
-"""
-MctsUct
-c: 0.5 0.0
- w: 0.54 0.46
-
-c: 0.5 0.1
- w: 0.47 0.52
-
-c: 0.5 0.2
- w: 0.5 0.48
-
-c: 0.5 0.5
- w: 0.43 0.53
-
-c: 0.5 0.7
- w: 0.43 0.5
+c: 0.5 2.0
+ w: 0.9 0.1
 
 c: 0.5 1.0
- w: 0.4 0.56
- 
+ w: 0.74 0.24
 
-c: 0.0 0.0
- w: 0.475 0.525
+c: 0.5 0.5
+ w: 0.55 0.42
 
-c: 0.0 0.05
- w: 0.525 0.475
+c: 0.5 0.2
+ w: 0.39 0.59
 
-c: 0.0 0.1
- w: 0.4975 0.4975
+ c: 0.2 0.5
+ w: 0.68 0.32
 
-c: 0.0 0.2
- w: 0.44 0.5575
+c: 0.2 0.2
+ w: 0.45 0.51
 
-c: 0.0 0.5
- w: 0.465 0.5325
-
-c: 0.0 1.0
- w: 0.4825 0.5125
-
- c: 0.0 0.0
- w: 0.536 0.464
-
-c: 0.0 0.2
- w: 0.443 0.554
-
-c: 0.0 0.5
- w: 0.441 0.555
+c: 0.2 0.1
+ w: 0.57 0.37
  """
+
+def penelty_test():
+    penelty1 = 0.5
+    for penelty2 in [0.0,0.5,1.0]:
+        mcts1 = Mcts(0,0,0,5,200,penelty=penelty1)
+        mcts2 = Mcts(0,0,0,5,200,penelty=penelty2)
+        player1_winprob, player2_winprob, _, _ = eval_mcts(5,5,4,mcts1,mcts2,sim_times=100, verbose=False)
+        print('\npe:',mcts1.penelty, mcts2.penelty,'\n',
+              'w:', player1_winprob,player2_winprob)
+"""
+c: 0.0 0.0
+ w: 0.51 0.49
+
+c: 0.0 0.2
+ w: 0.45 0.54
+
+c: 0.0 0.5
+ w: 0.41 0.585
+
+ pe: 0.5 0.0
+ w: 0.53 0.47
+
+pe: 0.5 0.5
+ w: 0.495 0.485
+
+pe: 0.5 1.0
+ w: 0.5 0.465
+"""
+
+
 
 def p_test():
     player1_wincnt = 0
@@ -152,6 +130,8 @@ MctsUct
 1 1.0
 
 """
+
+
 
 if __name__=='__main__':
     penelty_test()
