@@ -100,7 +100,7 @@ class Node:
                     udeno / (self.visits+1)
 
     def play(self, sim_board):
-        probs = self.mcts.cool_probs([child.visits for child in self.children])
+        probs = self.mcts.cool_probs(np.array([child.visits for child in self.children]))
         selection = np.random.choice(range(probs.size),p=probs,size=[1])
         return self.children[selection[0]]
 

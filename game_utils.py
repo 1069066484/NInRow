@@ -151,9 +151,9 @@ class Game:
             termination = self.check_over(act)
             if graphics and self.all_ai:
                 input()
-            if self.ps[turn] == Game.Player.AI:
-                probs, board = self.players[turn].mcts.probs_board()
-                print(probs)
+            # if self.ps[turn] == Game.Player.AI:
+            #    probs, board = self.players[turn].mcts.probs_board()
+            #    print(probs)
             if self.collect_ai_hists:
                 probs, board = self.players[turn].mcts.probs_board()
                 self.hists_prob.append(probs)
