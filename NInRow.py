@@ -32,12 +32,14 @@ def main_exe():
 
 from ZeroNN import *
 def main_debug():
-    game = Game(5,5,4,Game.Player.AI,Game.Player.AI,collect_ai_hists=False)
-    game.players[0].mcts.zeroNN = ZeroNN(path=join(FOLDER_ZERO_NNS, 'NNs'))
-    game.players[1].mcts.zeroNN = ZeroNN(path=join(FOLDER_ZERO_NNS, 'NNs'))
-    game.players[0].mcts.max_acts = 16
-    game.players[1].mcts.max_acts = 16
-    game.start(graphics=False)
+    game = Game(5,5,4,Game.Player.AI,Game.Player.human,collect_ai_hists=False)
+    zeroNN = ZeroNN(path=join(FOLDER_ZERO_NNS, 'NNs'), ckpt_idx=join(FOLDER_ZERO_NNS, 'NNs/model.ckpt-199588'))
+    # zeroNN = None
+    game.players[0].mcts.zeroNN = zeroNN
+    #game.players[1].mcts.zeroNN = ZeroNN(path=join(FOLDER_ZERO_NNS, 'NNs'))
+    game.players[0].mcts.max_acts = 256
+    #game.players[1].mcts.max_acts = 16
+    game.start(graphics=True)
     print("over")
     return None
     probs, eval_board, winner = game.ai_hists()
@@ -64,8 +66,8 @@ def eval_debug():
 
 
 if __name__=='__main__':
-    # main_debug()
-    eval_debug()
+    main_debug()
+    # eval_debug()
     """
     hists[i] is history of one single game
         hists[i][0]: a list of r*c arrays indicating probs

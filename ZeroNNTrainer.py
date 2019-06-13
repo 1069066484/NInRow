@@ -20,7 +20,7 @@ class ZeroNNTrainer:
     The details are elaborated in the paper 'Mastering the game of Go without human knowledge'.
     """
     def __init__(self, folder, board_rows=5, board_cols=5, n_in_row=4, 
-                 mcts_sims=16, self_play_cnt=100, reinit=True, batch_size=256):
+                 mcts_sims=128, self_play_cnt=1000, reinit=True, batch_size=256):
         self.board_rows = board_rows
         self.board_cols = board_cols
         self.self_play_cnt = self_play_cnt
@@ -59,18 +59,22 @@ class ZeroNNTrainer:
         print('trained')
 
     def optimization(self):
-        zeroNN = ZeroNN(verbose=3,path=self.folder_NNs, ckpt_idx=-1,
-                       epoch=4, batch_size=self.batch_size, save_epochs=3)
+        zeroNN = ZeroNN(verbose=2,path=self.folder_NNs, ckpt_idx=-1,
+                       epoch=3, batch_size=self.batch_size, save_epochs=4)
         self.unchkeck_model_paths = zeroNN.trained_model_paths
         print('optimization start!')
         while self.self_play_cnt > 0:
             while self.train_data is None:
                 time.sleep(5)
+            # given time slices for the other two threads
+            time.sleep(30)
             self.lock_train_data.acquire()
             train_data = [self.train_data[0].copy(), self.train_data[1].copy(), self.train_data[2].copy()]
             self.lock_train_data.release()
             zeroNN.fit(train_data[0],train_data[1],train_data[2])
-            zeroNN.epoch = 12
+            zeroNN.epoch = 20
+            zeroNN.verbose = 10
+            zeroNN.save_epochs = 5
             self.model_avail = True
             while not self.data_avail:
                 time.sleep(5)
@@ -87,20 +91,23 @@ class ZeroNNTrainer:
                 continue
             path_to_check = self.unchkeck_model_paths.pop()
             self.lock_model_paths.release()
+            print('evaluator:',self.best_player_path, 'VS' , path_to_check)
             zeroNN_best = ZeroNN(verbose=False,path=self.folder_NNs, ckpt_idx=self.best_player_path)
             zeroNN_to_check = ZeroNN(verbose=False,path=self.folder_NNs, ckpt_idx=path_to_check)
-            mcts1 = Mcts(0,0,zeroNN=zeroNN_best,max_acts_=self.mcts_sims)
-            mcts2 = Mcts(0,0,zeroNN=zeroNN_to_check,max_acts_=self.mcts_sims)
+            mcts1 = Mcts(0,0,zeroNN=zeroNN_best,max_acts_=self.mcts_sims,const_temp=0)
+            mcts2 = Mcts(0,0,zeroNN=zeroNN_to_check,max_acts_=self.mcts_sims,const_temp=0)
             winrate1, winrate2, tie_rate, ai_hists = \
                 eval_mcts(self.board_rows, self.board_cols, self.n_in_row, mcts1, mcts2, False, 50, False)
-            if winrate1 - winrate2 > 0.10:
-                print('evaluator:',path_to_check, 'defeat' , self.best_player_path, 'by', winrate1 - winrate2)
+            print('evaluator:',self.best_player_path, 'VS' , path_to_check,'--', winrate1,'-',winrate2,'-',tie_rate)
+            if winrate2 - winrate1 > 0.08:
+                print('evaluator:',path_to_check, 'defeat' , self.best_player_path, 'by', winrate2 - winrate1)
+                # zero_nns\NNs/model.ckpt-199588
                 self.lock_model_best.acquire()
                 self.best_player_path = path_to_check
                 self.lock_model_best.release()
 
     def self_play(self):
-        self.self_play_cnt /= 20
+        self.self_play_cnt //= 20
         while not self.model_avail:
             time.sleep(5)
         print('self_play start!')
@@ -110,13 +117,15 @@ class ZeroNNTrainer:
             best_player_path = self.best_player_path
             while self.self_play_cnt > 0:
                 self.self_play_cnt -= 1
-                mcts1 = Mcts(0,0,zeroNN=zeroNN1,max_acts_=self.mcts_sims)
-                mcts2 = Mcts(0,0,zeroNN=zeroNN2,max_acts_=self.mcts_sims)
+                print('self_play:','self_play_cnt=',self.self_play_cnt*20)
+                mcts1 = Mcts(0,0,zeroNN=zeroNN1,max_acts_=self.mcts_sims, const_temp=1, temp2zero_moves=3, noise=0.2)
+                mcts2 = Mcts(0,0,zeroNN=zeroNN2,max_acts_=self.mcts_sims, const_temp=1, temp2zero_moves=3, noise=0.2)
 
                 winrate1, winrate2, tie_rate, ai_hists = \
-                    eval_mcts(self.board_rows, self.board_cols, self.n_in_row, mcts1, mcts2, True, 20, True)
-                print('self_play:',winrate1, winrate2 , tie_rate,'  data size=', len(ai_hists[0]))
+                    eval_mcts(self.board_rows, self.board_cols, self.n_in_row, mcts1, mcts2, False, 20, True)
+                
                 ai_hists = self.hists2enhanced_train_data(ai_hists)
+                print('self_play:',winrate1, winrate2 , tie_rate,'  data size=', ai_hists[0].shape)
                 self.lock_train_data.acquire()
                 if len(self.train_data) == self.batch_size:
                     self.train_data = ai_hists
@@ -125,9 +134,9 @@ class ZeroNNTrainer:
                                        np.vstack([self.train_data[1], ai_hists[1]]),
                                        np.vstack([self.train_data[2], ai_hists[2]])]\
                                            if self.train_data is not None else ai_hists
-                if len(self.train_data[0]) > 4000:
+                if len(self.train_data[0]) > 10001:
                     for i in range(3):
-                        self.train_data[i] = self.train_data[i][:2000]
+                        self.train_data[i] = self.train_data[i][-10000:]
                 self.lock_train_data.release()
                 self.data_avail = True
                 self.lock_model_best.acquire()
@@ -155,7 +164,7 @@ class ZeroNNTrainer:
                 Y_policy.append(hist[0][i])
                 Y_value.append([0 if hist[2] is None else int(hist[2] == i % 2)])
 
-                X.append(reversed_eval_board(hist[1][i]))
+                X.append(self.reversed_eval_board(hist[1][i]))
                 Y_policy.append(hist[0][i])
                 Y_value.append([0 if hist[2] is None else int(hist[2] != i % 2)])
         return [np.array(X, dtype=np.int8), np.array(Y_policy).reshape(-1,self.board_rows * self.board_cols), np.array(Y_value)]

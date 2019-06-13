@@ -22,7 +22,7 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"]='3'
 class ZeroNN:
     def __init__(self, common_cnn=CNN.Params([[32,3],[64,3],[128,3]],None), 
                  policy_cnn=CNN.Params([[4,1]], []), value_cnn=CNN.Params([[2,1],2], [128]), 
-                 kp=0.5, lr_init=0.05, lr_dec_rate=0.95, batch_size=256, ckpt_idx=-2,
+                 kp=0.5, lr_init=0.05, lr_dec_rate=0.999, batch_size=256, ckpt_idx=-1, save_epochs=2,
                  epoch=10, verbose=None, act=tf.nn.relu, l2=1e-7, path=None, lock_model_path=None):
         """
         verbose: set verbose an integer to output the training history or None not to output
@@ -38,6 +38,7 @@ class ZeroNN:
         self.verbose = verbose
         self.lock_model_path = lock_model_path
         self.act = act
+        self.save_epochs = save_epochs
         self.l2 = l2
         self.path = None if path is None else mkdir(path)
         self.logger = log.Logger(None if self.path is None else join(self.path, logfn('ZeroNN-' + curr_time_str())), 
@@ -247,26 +248,29 @@ class ZeroNN:
             sess.run(train_step_t, feed_dict=feed_dict)
             # global_step = sess.run(global_step_t, feed_dict=feed_dict)
             if i % it_pep == 0:
+                it_epoch += 1
+                if not (it_epoch % self.save_epochs == 0 or it_epoch % self.verbose == 0):
+                    continue
                 global_step = sess.run(global_step_t, feed_dict=feed_dict)
                 train_eval = self.run_eval(self.X, self.Y_policy, self.Y_value)
                 test_eval = [-1.0 for i in range(4)] if self.X_te is None \
                       else self.run_eval(self.X_te, self.Y_policy_te, self.Y_value_te)
                 self.train_hists.append([global_step//it_pep] + train_eval)
                 self.test_hists.append([global_step//it_pep] + test_eval)
-                it_epoch += 1
                 if self.verbose is not None and it_epoch % self.verbose == 0:
                     self.logger.log('\nglobal_step:',global_step, '  epoch:',global_step//it_pep,
                           '\n   items:        [loss_policy,       loss_value,           loss_total,            acc_value]:',
                           '\n   train_eval: ',train_eval, 
                           '\n   test_eval:',  test_eval)
-                if self.path is not None:
+                if self.path is not None and it_epoch % self.save_epochs == 0:
                     path = self.saver.save(sess, self.path + '/model.ckpt', global_step=global_step_t, write_meta_graph=False)
-                    # print(path)
+                    if self.verbose  is not None:
+                        self.logger.log('model saved in',path)
                     if self.lock_model_path is not None:
-                        lock_model_path.acquire()
+                        self.lock_model_path.acquire()
                     self.trained_model_paths.append(path)
                     if self.lock_model_path is not None:
-                        lock_model_path.release()
+                        self.lock_model_path.release()
                     self.save_hists()
         #if self.path is not None:
         #    self.saver.save(sess, self.path + '/0', write_meta_graph=True)
