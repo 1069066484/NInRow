@@ -14,6 +14,9 @@ in terms of ai2, the results improve from (p1-135 p2-50 tie-15) to (p1-100 p2-92
 12-06-2018
 The multi-thread supported training codes are completed. And multi-thread support is also added for the MctsPuct's search. With a CPU of i5-4200H, the seach speed is almost doubled.
 
+14-06-2018
+A problem difficult to solve emerged: the network cannot well predict the value/ winning prob of a game. So the search usually goes againest the predicted policy.
+
 Main References:
 1. Mastering the game of Go with deep neural networks and tree search. The paper details method used for AlphaGO Lee, which defeated Lee SeDol in 2016.
 2. Mastering the game of Go without human knowledge. The paper details method used for AlphaGO Zeros, a model trained without any human knowledge but is able to defeat AlphaGO Lee.
