@@ -28,7 +28,7 @@ And Alpha-a can defeat Alpha-b if b > a.
 Alpha-1037, 1433, 2621, 8561, 17396, 23761, 29486, 30759, 32672, 37124, 39037, 44765.
 
 15-06-2018
-The training is optimized. The latest, maybe not the best, trained Alpha-44793 trained today, playing 4-in-row on a 5*5 board, defeat  
+The training is optimized. The latest, maybe not the best, trained Alpha-44793 trained today, playing 4-in-row on a 5*5 board, got great performance.    
   &ensp; a. [5-5-4]-(Alpha-44793[256])-vs-(MCTS-PUCT-[256])-(13,6,1),  
   &ensp; b. [5-5-4]-(Alpha-44793[512])-vs-(MCTS-PUCT-[512])-(14,6,0),  
   &ensp; c. [5-5-4]-(Alpha-44793[512])-vs-(MCTS-PUCT-[2048])-(9,8,3),  
