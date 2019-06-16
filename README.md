@@ -21,14 +21,8 @@ Here are some denotation:
   &ensp; c. Use [r-c-n]-p1-vs-p2-(w,l,t) to denote a game of l-in-row using a r-by-c board and p1 wins w and p2 wins l and t are ties. 
 An AI that plays 4-in-row on a 5*5 board is trained.
 
-15-06-2018
-The training is optimized. The latest, maybe not the best, trained Alpha-44793 trained today, playing 4-in-row on a 5*5 board, got great performance.    
-  &ensp; a. [5-5-4]-(Alpha-44793[256])-vs-(MCTS-PUCT-[256])-(13,6,1),  
-  &ensp; b. [5-5-4]-(Alpha-44793[512])-vs-(MCTS-PUCT-[512])-(14,6,0),  
-  &ensp; c. [5-5-4]-(Alpha-44793[512])-vs-(MCTS-PUCT-[2048])-(9,8,3),  
-  &ensp; d. [5-5-4]-(Alpha-44793[512])-vs-(MCTS-PUCT-[4096])-(13,5,2).  
+Given the first move, AI can play well. The image below is a screen shot of the game. AI is player1, and she learned to construct a triangle, under such situation, player2 has no chance to win.
 
-Given the first move, AI can play well.
 ![Image text](https://github.com/1069066484/NInRow/blob/master/ai554_6_16/5.png)
 
 Main References:
