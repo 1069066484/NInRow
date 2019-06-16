@@ -21,7 +21,7 @@ Here are some denotation:
   &ensp; c. Use [r-c-n]-p1-vs-p2-(w,l,t) to denote a game of l-in-row using a r-by-c board and p1 wins w and p2 wins l and t are ties. 
 An AI that plays 4-in-row on a 5*5 board is trained.
 
-Given the first move, AI can play well. The image below is a screen shot of the game. AI is player1, and she learned to construct a triangle, under such situation, player2 has no chance to win.
+Given the first move, AI can play well with only 512 simulations for each move. The image below is a screen shot of the game. AI is player1, and she learns to construct a triangle, under such situation, player2 has no chance to win.
 
 ![Image text](https://github.com/1069066484/NInRow/blob/master/ai554_6_16/5.png)
 
