@@ -32,13 +32,15 @@ def main_exe():
 
 from ZeroNN import *
 def main_debug():
-    game = Game(5,5,4,Game.Player.AI,Game.Player.human,collect_ai_hists=False)
-    zeroNN = ZeroNN(path=join(FOLDER_ZERO_NNS, 'NNs'), ckpt_idx=join(FOLDER_ZERO_NNS, 'NNs/model.ckpt-199588'))
-    # zeroNN = None
-    game.players[0].mcts.zeroNN = zeroNN
-    #game.players[1].mcts.zeroNN = ZeroNN(path=join(FOLDER_ZERO_NNS, 'NNs'))
-    game.players[0].mcts.max_acts = 256
-    #game.players[1].mcts.max_acts = 16
+    game = Game(5,5,4,Game.Player.AI,Game.Player.AI,collect_ai_hists=False)
+    # zeroNN = ZeroNN(path=join(FOLDER_ZERO_NNS, 'NNs'), ckpt_idx=join(FOLDER_ZERO_NNS, 'NNs/model.ckpt-188'))
+    zeroNN1 = ZeroNN(path=join(FOLDER_ZERO_NNS, 'NNs'), ckpt_idx= 'zero_nns/NNs/model.ckpt-84313')#join(FOLDER_ZERO_NNS, 'NNs/model.ckpt-64015'))
+    zeroNN = None
+    game.players[0].mcts.zeroNN = None
+    game.players[0].mcts.max_acts = 1024
+
+    game.players[1].mcts.zeroNN = zeroNN1
+    game.players[1].mcts.max_acts = 512
     game.start(graphics=True)
     print("over")
     return None
@@ -56,14 +58,19 @@ def main_debug():
 
 
 def eval_debug():
-    zeroNN1 = ZeroNN(verbose=False,path=join(FOLDER_ZERO_NNS, 'NNs'))
-    zeroNN2 = ZeroNN(verbose=False,path=join(FOLDER_ZERO_NNS, 'NNs'))
-    mcts1 = Mcts(0,0,zeroNN=zeroNN1,max_acts_=64)
-    mcts2 = Mcts(0,0,zeroNN=zeroNN2,max_acts_=64)
+    # zeroNN1 = ZeroNN(verbose=False,path=join(FOLDER_ZERO_NNS, 'NNs'))
+    zeroNN1 = None
+    # zeroNN2 = ZeroNN(verbose=False,path=join(FOLDER_ZERO_NNS, 'NNs'))
+    zeroNN2 = ZeroNN(verbose=False,path=join(FOLDER_ZERO_NNS, 'NNs'), ckpt_idx=join(FOLDER_ZERO_NNS, 'NNs/model.ckpt-44793'))
+    zeroNN2 = None
+    mcts1 = Mcts(0,0,zeroNN=zeroNN1,max_acts_=512)
+    mcts2 = Mcts(0,0,zeroNN=zeroNN2,max_acts_=2048)
     winrate1, winrate2, tie_rate, ai_hists = \
         eval_mcts(5, 5, 4, mcts1, mcts2, True, 10, True)
     print(winrate1, winrate2, tie_rate)
-
+    '''
+    
+    '''
 
 if __name__=='__main__':
     main_debug()

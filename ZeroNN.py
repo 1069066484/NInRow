@@ -14,16 +14,20 @@ from global_defs import *
 from CNN import CNN
 import log
 import copy
+from scipy import misc
 
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"]='3'
 
 
 class ZeroNN:
-    def __init__(self, common_cnn=CNN.Params([[32,3],[64,3],[128,3]],None), 
-                 policy_cnn=CNN.Params([[4,1]], []), value_cnn=CNN.Params([[2,1],2], [128]), 
-                 kp=0.5, lr_init=0.05, lr_dec_rate=0.999, batch_size=256, ckpt_idx=-1, save_epochs=2,
-                 epoch=10, verbose=None, act=tf.nn.relu, l2=1e-7, path=None, lock_model_path=None):
+    def __init__(self, 
+                 common_cnn=CNN.Params([[128,3],[128,3],[128,3]],None), 
+                 policy_cnn=CNN.Params([[2,1]], []), 
+                 value_cnn=CNN.Params([[1,1],1], [128]), 
+                 kp=0.5, lr_init=0.1, lr_dec_rate=0.999, batch_size=256, ckpt_idx=-1, save_epochs=2,
+                 epoch=10, verbose=None, act=tf.nn.relu, l2=5e-5, path=None, lock_model_path=None,
+                 num_samples=None):
         """
         verbose: set verbose an integer to output the training history or None not to output
         """
@@ -31,6 +35,7 @@ class ZeroNN:
         self.policy_cnn = policy_cnn
         self.value_cnn = value_cnn
         self.kp = kp
+        self.num_samples = num_samples
         self.lr_init = lr_init
         self.lr_dec_rate = lr_dec_rate
         self.batch_size = batch_size
@@ -66,8 +71,9 @@ class ZeroNN:
                 self.ts[ts] = tf.get_collection(ts)[0]
 
     def __str__(self):
-        return "ZeroNN-- common_cnns: {} \tfcs: {} \tkp: {} \tlr_init: {} \tlr_dec_rate: {} \tbatch_size: {} \tepoch: {} \tact: {}".format(
-            self.common_cnns, self.fcs, self.kp, self.lr_init, self.lr_dec_rate, self.batch_size, self.epoch, str(self.act).split(' ')[1] if self.act is not None else 'NONE')
+        return "ZeroNN"
+        return "ZeroNN-- common_cnn: {} \tfcs: {} \tkp: {} \tlr_init: {} \tlr_dec_rate: {} \tbatch_size: {} \tepoch: {} \tact: {}".format(
+            self.common_cnn, self.fcs, self.kp, self.lr_init, self.lr_dec_rate, self.batch_size, self.epoch, str(self.act).split(' ')[1] if self.act is not None else 'NONE')
 
     def init_training_data(self, X, Y_policy, Y_value, reserve_test):
         if reserve_test is not None:
@@ -98,14 +104,22 @@ class ZeroNN:
         self.init_sess(refresh_saving)
         self.train()
 
+    def tf_random_rotate90(self, image, rotate_prob=0.5):
+        rotated = tf.image.rot90(image)
+        rand = tf.random_uniform([], minval=0, maxval=1)
+        return tf.cond(tf.greater(rand, rotate_prob), lambda: image, lambda: rotated)
+        
     def construct_model(self):
         tf.reset_default_graph()
-        
         n_xs, rows, cols, channels = self.X.shape
         n_labels_value = self.Y_value.shape[1]
         n_labels_policy = self.Y_policy.shape[1]
         x = tf.placeholder(tf.float32, [None, rows, cols, channels], name='x')
-        x_trans = tf.image.flip_up_down(tf.image.flip_left_right(x))
+        x_trans = self.tf_random_rotate90(x)
+        def flip(img):
+            return tf.image.random_flip_left_right(tf.image.random_flip_left_right(img))
+        # x_trans = tf.image.random_flip_left_right(tf.image.random_flip_left_right(x))
+        x_trans = tf.map_fn(flip, x_trans)
         kp = tf.placeholder(tf.float32, [], name='kp')
         y_value = tf.placeholder(tf.int8, [None, n_labels_value], name='y_value')
         y_policy = tf.placeholder(tf.float32, [None, n_labels_policy], name='y_policy')
@@ -134,7 +148,9 @@ class ZeroNN:
 
         # define loss and accuracies of policy network
         # tf.losses.softmax_cross_entropy() cannot be used for cross_entropy calculation since the labels are not ONE-HOT
-        loss_policy = tf.reduce_mean(-y_policy*tf.log(tf.clip_by_value(logits_policy,1e-10,1.0)), name='loss_policy')
+        cross_entropy_policy = -tf.reduce_sum(y_policy*tf.log(tf.clip_by_value(logits_policy,1e-10,1.0)),1)
+        loss_policy = tf.reduce_mean(cross_entropy_policy, name='loss_policy')
+        #loss_policy = tf.reduce_mean(-y_policy*tf.log(tf.clip_by_value(logits_policy,1e-10,1.0)), name='loss_policy')
         pred_policy = tf.add_n([logits_policy], name='pred_policy')
         
         # regularization_loss = tf.add_n(tf.losses.get_regularization_losses, name='loss_l2') 
@@ -146,8 +162,10 @@ class ZeroNN:
         lr = tf.train.exponential_decay(
             self.lr_init,
             global_step,
-            n_xs / self.batch_size, self.lr_dec_rate,
+            (n_xs if self.num_samples is None else self.num_samples) / self.batch_size, 
+            self.lr_dec_rate,
             staircase=True)
+        lr = tf.reduce_max([lr, 8e-5])
         optimizer = tf.train.AdamOptimizer(learning_rate=lr)
         train_step = slim.learning.create_train_op(
             loss_total,  optimizer, global_step=global_step)
@@ -180,9 +198,18 @@ class ZeroNN:
             batch_xs = X[batch_idx:batch_idx_next]
             batch_ys_policy = Y_policy[batch_idx:batch_idx_next]
             batch_ys_value = Y_value[batch_idx:batch_idx_next]
-            feed_dict.update({self.ts['x']: batch_xs, self.ts['y_value']: batch_ys_value, self.ts['y_policy']: batch_ys_policy})
-            [loss_policy, loss_value, loss_total, acc_value] = self.sess.run(
-                [self.ts['loss_policy'], self.ts['loss_value'], self.ts['loss_total'], self.ts['acc_value']],feed_dict=feed_dict)
+            feed_dict.update({self.ts['x']: batch_xs, 
+                              self.ts['y_value']: batch_ys_value, 
+                              self.ts['y_policy']: batch_ys_policy})
+            [loss_policy, 
+             loss_value, 
+             loss_total, 
+             acc_value] = self.sess.run(
+                [self.ts['loss_policy'], 
+                 self.ts['loss_value'], 
+                 self.ts['loss_total'], 
+                 self.ts['acc_value']],
+                 feed_dict=feed_dict)
             mult = batch_idx_next - batch_idx
             loss_policy_sum += loss_policy * mult
             loss_value_sum += loss_value * mult
@@ -231,7 +258,7 @@ class ZeroNN:
     def train(self):
         sess = self.sess
         self.curr_tr_batch_idx = 0
-        it_pep = round(self.X.shape[0] / self.batch_size)
+        it_pep = max(round(self.X.shape[0] / self.batch_size), 1)
         if self.path is not None:
             self.saver.save(sess, self.path + '/0', write_meta_graph=True)
         it_epoch = 0
@@ -242,11 +269,13 @@ class ZeroNN:
         is_train_t = self.ts['is_train']
         train_step_t = self.ts['train_step']
         global_step_t = self.ts['global_step']
+        # sess.run(tf.assign(global_step_t, 1))
         for i in range(round(self.epoch * self.X.shape[0] / self.batch_size)+1):
             batch_xs, batch_ys_policy, batch_ys_value = self.next_batch()
             feed_dict = {x_t: batch_xs, kp_t: self.kp, y_value_t: batch_ys_value, y_policy_t: batch_ys_policy, is_train_t: True}
             sess.run(train_step_t, feed_dict=feed_dict)
             # global_step = sess.run(global_step_t, feed_dict=feed_dict)
+            # sess.run(tf.assign(global_step_t, tf.reduce_max([global_step_t, 1e-5]) ))
             if i % it_pep == 0:
                 it_epoch += 1
                 if not (it_epoch % self.save_epochs == 0 or it_epoch % self.verbose == 0):

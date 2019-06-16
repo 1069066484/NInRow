@@ -11,6 +11,8 @@ from enum import IntEnum
 
 join = os.path.join
 exists = os.path.exists
+
+
 def mkdir(dir):
     if not exists(dir):
         os.mkdir(dir)

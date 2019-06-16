@@ -17,7 +17,7 @@ class CNN:
     class Params:
         """
         cnns:   a list with scalars(pooling layer) or two-element list(channels, kernel_size) as its element
-        fcs:    a list of scalars, indicating neurons of fully connected layers. Set fcs to None if you don't wanna the
+        fcs:    a list of scalars, indicating neurons of fully connected layers. Set fcs to None if you don't want the
               output flattened.
         """
         def __init__(self, cnns, fcs):

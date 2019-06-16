@@ -4,7 +4,6 @@
 @Description: Part of the NinRowAI: console interface and game board logit.
 """
 
-from random import choice, shuffle
 from math import log, sqrt
 import numpy as np
 from enum import IntEnum
@@ -132,6 +131,12 @@ class Game:
             print('\n\n')
             c_cnt += 1
 
+    def collect_hists(self, turn):
+        if self.collect_ai_hists:
+            probs, board = self.players[turn].mcts.probs_board()
+            self.hists_prob.append(probs)
+            self.hists_board.append(board)
+
     def start(self, graphics=True):
         if graphics: self.graphics()
         turn = 0
@@ -145,19 +150,18 @@ class Game:
                 # input()
                 self.players[turn].mcts.enemy_move = act
             act = self.players[turn].get_valid_action()
+            if act is None:
+                if graphics:
+                    print('Player',turn + 1,'resigns')
+                self.winner = 1 - turn
+                break
             self.board.board[act[0]][act[1]] = grid_states[turn]
             if graphics: 
                 self.graphics('Last move of player' + str(turn+1) + ':' + str(act))
             termination = self.check_over(act)
             if graphics and self.all_ai:
                 input()
-            # if self.ps[turn] == Game.Player.AI:
-            #    probs, board = self.players[turn].mcts.probs_board()
-            #    print(probs)
-            if self.collect_ai_hists:
-                probs, board = self.players[turn].mcts.probs_board()
-                self.hists_prob.append(probs)
-                self.hists_board.append(board)
+            self.collect_hists(turn)
             if termination != Termination.going:
                 if termination == Termination.won:
                     if graphics: 
@@ -168,7 +172,7 @@ class Game:
                     if graphics: 
                         print('tie')
                 break
-            turn = (turn + 1) % 2
+            turn = 1 - turn
 
     def ai_hists(self):
         """
@@ -219,8 +223,8 @@ def eval_mcts(rows, cols, n_in_row, mcts1, mcts2, verbose=True, sim_times=100, c
             game.players[id].mcts.from_another_mcts(mcts1)
             game.players[1-id].mcts.from_another_mcts(mcts2)
             game.start(graphics=False)
-            player1_wincnt += game.winner == id
-            player2_wincnt += game.winner == 1-id
+            player1_wincnt += (game.winner == id)
+            player2_wincnt += (game.winner == 1-id)
             if verbose:
                 print(player1_wincnt, player2_wincnt)
             if collect_ai_hists:

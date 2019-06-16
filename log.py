@@ -26,10 +26,12 @@ def init_logger(name, fn):
 
 
 class Logger(object):
-    def __init__(self, file=None, console=True):
+    def __init__(self, file=None, console=True, flush_freq=10):
         self.terminal = sys.stdout
         self.file = None if file is None else open(file, "w")
         self.console = console
+        self.flush_freq = flush_freq
+        self.write_cnt = 0
 
     def log(self, *message):
         message = (' '.join([str(m) for m in message])) + '\n'
@@ -37,6 +39,10 @@ class Logger(object):
             self.terminal.write(message)
         if self.file is not None:
             self.file.write(message)
+            self.write_cnt += 1
+            if self.write_cnt % self.flush_freq == 0:
+                self.file.flush() 
  
     def flush(self):
-        pass
+        if self.file is not None:   
+            self.file.flush() 

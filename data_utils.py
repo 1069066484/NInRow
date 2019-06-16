@@ -173,8 +173,17 @@ def raw_pendigits2dl(fn):
     return [np.array(data, dtype=np.float32), np.array(labels, dtype=np.int8)]
 
 
+def test_non_repeated_random_nums():
+    nums = non_repeated_random_nums(10,round(10 * 0.3))
+    print(nums)
+    a = np.array([9,8,7,6,5,4,3,2,1,0])
+    l = [9,8,7,6,5,4,3,2,1,0]
+    print(a[nums])
+    print(l[nums])
+
 
 if __name__ == '__main__':
+    test_non_repeated_random_nums()
     pass
     # print(__file__)
     # print(exists('./datasets_raw'))
