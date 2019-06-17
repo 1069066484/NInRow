@@ -10,6 +10,7 @@ import numpy as np
 from sklearn.metrics import *
 from data_utils import *
 from global_defs import *
+from tensorflow.contrib.slim import nets
 
 
 
@@ -48,7 +49,12 @@ class CNN:
 
     def __init__(self, cnn_params=Params([[16,5],2,[32,5],2], [1024]), 
                  kp=0.5, lr_init=0.05, lr_dec_rate=0.95, batch_size=128,
-                 epoch=10, verbose=False, act=tf.nn.relu, l2=5e-8, path=None):
+                 epoch=10, verbose=False, act=tf.nn.relu, l2=5e-8, path=None,
+                 resnet_v2=None):
+        """
+        built_net: a resnet_v2. Like nets.resnet_v2.resnet_v2_50. Check source codes of tensorflow.contrib.slim.nets.resnet_v2
+            for how to make a resnet! The input images first go through built_net and then the net constructed by CNN. 
+        """
         self.params = cnn_params
         self.kp = kp
         self.lr_init = lr_init
@@ -60,6 +66,7 @@ class CNN:
         self.l2 = l2
         self.path = None if path is None else mkdir(path)
         self.sess = None
+        self.resnet_v2 = resnet_v2
         self.ts = {}
         self.var_names = ['kp', 'y', 'acc', 'is_train', 'pred', 'global_step', 'loss','x', 'train_step']
 
@@ -109,15 +116,24 @@ class CNN:
         n_labels = self.Y.shape[1]
         x = tf.placeholder(tf.float32, [None, slen*slen], name='x')
         x_trans = tf.reshape(x, [-1, slen, slen, 1])
+        if self.resnet_v2 is not None:
+            x_trans = tf.image.grayscale_to_rgb(x_trans)
         kp = tf.placeholder(tf.float32, [], name='kp')
         y = tf.placeholder(tf.float32, [None, n_labels], name='y')
         is_train = tf.placeholder(tf.bool, [], name='is_train')
+        net = x_trans
         with slim.arg_scope([slim.conv2d, slim.fully_connected],
                     activation_fn=self.act,
                     normalizer_fn=tf.layers.batch_normalization,
                     normalizer_params={'training': is_train, 'momentum': 0.95},
                     weights_regularizer=slim.l2_regularizer(self.l2)):
-            net = self.params.construct(x_trans, kp)
+            if self.resnet_v2 is not None:
+                net, _ = self.resnet_v2(
+                net, num_classes=None, is_training=is_train, global_pool=True)
+            if self.params is not None:
+                net = self.params.construct(net, kp)
+            if len(net.shape) > 2:
+                net = slim.flatten(net)
             logits = slim.fully_connected(net, n_labels, activation_fn=None, scope='logits')
         pred = tf.argmax(logits,1, name='pred')
         corrects = tf.equal(tf.argmax(logits,1),tf.argmax(y,1))
@@ -203,7 +219,7 @@ class CNN:
                 print("iteration:",i,' global_step:',global_step, '  train_acc: ',self.run_acc(self.X, self.Y), '   test_acc:', 
                       -1.0 if self.X_te is None else self.run_acc(self.X_te, self.Y_te))
                 if self.path is not None:
-                    self.saver.save(sess, self.path + '/123', global_step=global_step_t, write_meta_graph=False)
+                    self.saver.save(sess, self.path + '/model', global_step=global_step_t, write_meta_graph=False)
 
     def predict(self, X):
         if self.sess is None:
@@ -213,5 +229,24 @@ class CNN:
         return pred
 
 
+def main_mnist():
+    data, labels = read_mnist_dl()
+    # print(data.shape)
+    data = data[:5000]
+    labels = labels[:5000]
+    cnn = CNN(path='log_noresCNN',epoch=3, verbose=True, batch_size=4, resnet_v2=None)
+    cnn.fit(data, labels, 0.2)
+
+
+def main_mnist_res():
+    data, labels = read_mnist_dl()
+    # print(data.shape)
+    data = data[:5000]
+    labels = labels[:5000]
+    cnn = CNN(path='log_resCNN',epoch=3, verbose=True, batch_size=4, resnet_v2=nets.resnet_v2.resnet_v2_50, cnn_params=None)
+    cnn.fit(data, labels, 0.2)
+
+
 if __name__ == "__main__":
-    pass
+    # main_mnist()
+    main_mnist_res()
