@@ -15,6 +15,7 @@ from CNN import CNN
 import log
 import copy
 from scipy import misc
+from tensorflow.contrib.slim import nets
 
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"]='3'
@@ -22,14 +23,19 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"]='3'
 
 class ZeroNN:
     def __init__(self, 
-                 common_cnn=CNN.Params([[128,3],[128,3],[128,3]],None), 
+                 common_cnn=CNN.Params([[128,3],[256,3],[128,3]],None), 
+                 #common_cnn=None,
                  policy_cnn=CNN.Params([[2,1]], []), 
-                 value_cnn=CNN.Params([[1,1],1], [128]), 
+                 value_cnn=CNN.Params([[1,1],1], [256]), 
                  kp=0.5, lr_init=0.1, lr_dec_rate=0.999, batch_size=256, ckpt_idx=-1, save_epochs=2,
                  epoch=10, verbose=None, act=tf.nn.relu, l2=5e-5, path=None, lock_model_path=None,
-                 num_samples=None):
+                 num_samples=None, 
+                 resnet_v2=None, 
+                 logger=None):
         """
         verbose: set verbose an integer to output the training history or None not to output
+        resnet_v2: a resnet_v2. Like nets.resnet_v2.resnet_v2_50. Check source codes of tensorflow.contrib.slim.nets.resnet_v2 for how to make a resnet! The input images first go through built_net and then the net constructed by common_cnn. 
+        common_cnn: can be set 0 if you don't wanna use it.
         """
         self.common_cnn = common_cnn
         self.policy_cnn = policy_cnn
@@ -48,6 +54,8 @@ class ZeroNN:
         self.path = None if path is None else mkdir(path)
         self.logger = log.Logger(None if self.path is None else join(self.path, logfn('ZeroNN-' + curr_time_str())), 
                                  verbose is not None)
+        if logger is not None:
+            self.logger = logger
         self.sess = None
         self.ts = {}
         self.ckpt_idx = ckpt_idx
@@ -55,6 +63,7 @@ class ZeroNN:
         'loss_policy', 'loss_value', 'pred_value','acc_value', 
         'pred_policy', 'loss_l2', 'loss_total', 'global_step','train_step']
         self.trained_model_paths = []
+        self.resnet_v2 = resnet_v2
 
     def print_vars(self, graph=None, vars=True, ops=True):
         if graph is None:
@@ -109,29 +118,49 @@ class ZeroNN:
         rand = tf.random_uniform([], minval=0, maxval=1)
         return tf.cond(tf.greater(rand, rotate_prob), lambda: image, lambda: rotated)
         
+    # we only do data augmentation when training
+    def preprocess(self, x, y_policy, is_train, rows, cols):
+        def augment():
+            y_policy_trans = tf.reshape(y_policy, [-1, rows, cols, 1])
+            # x and y_policy should be stacked, it is not right to rotate x only!
+            x_y_policy = tf.concat([x, y_policy_trans], axis=3)
+            x_y_policy = self.tf_random_rotate90(x_y_policy)
+            def flip(img):
+                return tf.image.random_flip_left_right(tf.image.random_flip_left_right(img))
+            # x_trans = tf.image.random_flip_left_right(tf.image.random_flip_left_right(x))
+            x_y_policy = tf.map_fn(flip, x_y_policy)
+            x_trans = x_y_policy[:,:,:,:4]
+            y_policy_trans = x_y_policy[:,:,:,4]
+            y_policy_trans = slim.flatten(y_policy_trans)
+            return [x_trans, y_policy_trans]
+        def no_augment():
+            return [x, y_policy]
+        x_trans, y_policy_trans = tf.cond(is_train, augment, no_augment)
+        return x_trans, y_policy_trans
+
     def construct_model(self):
         tf.reset_default_graph()
         n_xs, rows, cols, channels = self.X.shape
         n_labels_value = self.Y_value.shape[1]
         n_labels_policy = self.Y_policy.shape[1]
         x = tf.placeholder(tf.float32, [None, rows, cols, channels], name='x')
-        x_trans = self.tf_random_rotate90(x)
-        def flip(img):
-            return tf.image.random_flip_left_right(tf.image.random_flip_left_right(img))
-        # x_trans = tf.image.random_flip_left_right(tf.image.random_flip_left_right(x))
-        x_trans = tf.map_fn(flip, x_trans)
-        kp = tf.placeholder(tf.float32, [], name='kp')
         y_value = tf.placeholder(tf.int8, [None, n_labels_value], name='y_value')
         y_policy = tf.placeholder(tf.float32, [None, n_labels_policy], name='y_policy')
+        kp = tf.placeholder(tf.float32, [], name='kp')
         is_train = tf.placeholder(tf.bool, [], name='is_train')
-
+        x_trans, y_policy_trans = self.preprocess(x, y_policy, is_train, rows, cols)
+        output_common = x_trans
         # construct shared, policy and value networks: one way in, two ways out
         with slim.arg_scope([slim.conv2d, slim.fully_connected],
                     activation_fn=self.act,
                     normalizer_fn=tf.layers.batch_normalization,
                     normalizer_params={'training': is_train, 'momentum': 0.95},
                     weights_regularizer=slim.l2_regularizer(self.l2)):
-            output_common = self.common_cnn.construct(x_trans, kp, "common_")
+            if self.resnet_v2 is not None:
+                output_common, _ = self.resnet_v2(
+                output_common, num_classes=None, is_training=is_train, global_pool=False)
+            if self.common_cnn is not None:
+                output_common = self.common_cnn.construct(output_common, kp, "common_")
             output_policy = self.policy_cnn.construct(output_common, kp, "policy_")
             logits_policy = slim.fully_connected(output_policy, rows * cols, activation_fn=tf.nn.softmax, scope='logits_policy')
             output_value = self.value_cnn.construct(output_common, kp, "value_")
@@ -148,9 +177,8 @@ class ZeroNN:
 
         # define loss and accuracies of policy network
         # tf.losses.softmax_cross_entropy() cannot be used for cross_entropy calculation since the labels are not ONE-HOT
-        cross_entropy_policy = -tf.reduce_sum(y_policy*tf.log(tf.clip_by_value(logits_policy,1e-10,1.0)),1)
+        cross_entropy_policy = -tf.reduce_sum(y_policy_trans*tf.log(tf.clip_by_value(logits_policy,1e-10,1.0)),1)
         loss_policy = tf.reduce_mean(cross_entropy_policy, name='loss_policy')
-        #loss_policy = tf.reduce_mean(-y_policy*tf.log(tf.clip_by_value(logits_policy,1e-10,1.0)), name='loss_policy')
         pred_policy = tf.add_n([logits_policy], name='pred_policy')
         
         # regularization_loss = tf.add_n(tf.losses.get_regularization_losses, name='loss_l2') 
@@ -326,21 +354,25 @@ class ZeroNN:
         if self.sess is None:
             if not self.init_sess(refresh_saving=False):
                 raise Exception("Error: trying to predict without trained network")
-        pred_value, pred_policy = self.sess.run([self.ts['pred_value'], self.ts['pred_policy']], 
-                             feed_dict={self.ts['x']: X, self.ts['kp']: 1.0, self.ts['is_train']: False})
+        # y_policy is not necessary for prediction
+        # but we just needed for placeholder
+        pred_value, pred_policy = self.sess.run([self.ts['pred_value'], self.ts['pred_policy']], feed_dict={self.ts['x']: X, 
+                                        self.ts['kp']: 1.0,
+                                        self.ts['is_train']: False,
+                                        self.ts['y_policy']: np.zeros([X.shape[0], X.shape[1]*X.shape[2]])})
         return [pred_value, pred_policy]
 
 
 def main_sim_train():
-    num_samples = 5000
+    num_samples = 500
     rows = 5
     cols = 5
     channel = 4
     X = np.random.rand(num_samples,rows,cols, channel)
     Y_value = np.random.randint(0,2,[num_samples,1], dtype=np.int8)
     Y_policy = np.random.rand(num_samples,rows*cols)
-    clf = ZeroNN(verbose=2, path='ZeroNN', ckpt_idx='ZeroNN/model.ckpt-309')
-    clf.fit(X, Y_policy, Y_value, 0.1)
+    clf = ZeroNN(verbose=2, path='ZeroNN_test', common_cnn=None, resnet_v2=nets.resnet_v2.resnet_v2_50)
+    # clf.fit(X, Y_policy, Y_value, 0.1)
     print(X[:2].shape)
     pred_value, pred_policy = clf.predict(X[:2])
     print(pred_value, pred_policy)
@@ -357,6 +389,7 @@ def _test_flip():
         print(data[0][:,:,0])
         print(data[1][:,:,1])
 
+        
 if __name__=='__main__':
     main_sim_train()
 

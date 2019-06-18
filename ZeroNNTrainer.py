@@ -76,7 +76,7 @@ class ZeroNNTrainer:
     def optimization(self):
         with self.lock_model_paths:
             zeroNN = ZeroNN(verbose=2,path=self.folder_NNs, ckpt_idx=-1, num_samples=self.train_size,
-                           epoch=3, batch_size=self.batch_size, save_epochs=4)
+                           epoch=3, batch_size=self.batch_size, save_epochs=4, logger=self.logger)
             self.unchkeck_model_paths = zeroNN.trained_model_paths
         self.logger.log('optimization start!')
         while self.self_play_cnt > 0:
