@@ -17,27 +17,39 @@ from tensorflow.contrib.slim import nets
 class CNN:
     class Params:
         """
-        cnns:   a list with scalars(pooling layer) or two-element list(channels, kernel_size) as its element
-        fcs:    a list of scalars, indicating neurons of fully connected layers. Set fcs to None if you don't want the
-              output flattened.
+        @cnns:   a list with scalars(pooling layer) or two-element list(channels, kernel_size) as its element, or use a list in list to indicate a residual block, set a kernel size negative to set paddings valid
+            ex. [[16,5],2,[32,5],2] or [[16,5],2,[[32,5],[32,-5]], 2]
+            ATTENTION: the codes do not help verify the size of the features.
+        @fcs:    a list of scalars, indicating neurons of fully connected layers. Set fcs to None if you don't want the output flattened.
         """
         def __init__(self, cnns, fcs):
             self.cnns = cnns
             self.fcs = fcs
 
         def __str__(self):
-            return '[cnn:' + str(self.cnns) + '   fcs:' + str(self.fcs) + ']'
+            return '[cnn:' + str(self.cnns) + '   fcs:' + str(self.fcs) +  '    res_blocks:' + ']'
 
         def construct(self, input, keep_prob=1.0, scope_prefix=""):
             conv_cnt = 1
             pool_cnt = 1
+            block_cnt = 1
             net = input
             for param in self.cnns:
                 if isinstance(param, int):
                     net = slim.max_pool2d(net, [param,param], scope=scope_prefix + 'pool' + str(pool_cnt))
                     pool_cnt += 1
+                elif not isinstance(param[0], int):
+                    residual = net
+                    for layer_i, block in enumerate(param):
+                        residual = slim.conv2d(residual, block[0], abs(block[1]), padding='SAME' if block[1] > 0 else "VALID",
+                                               scope=scope_prefix + 'block' + str(block_cnt) + 'conv' + str(layer_i))
+                    shortcut = slim.conv2d(net, int(residual.shape[-1]), 1, padding='SAME' ,
+                                               scope=scope_prefix + 'block' + str(block_cnt) + 'shortcut')
+                    net = shortcut + residual
+                    block_cnt += 1
                 else:
-                    net = slim.conv2d(net, param[0], [param[1],param[1]], scope=scope_prefix+'conv' + str(conv_cnt))
+                    net = slim.conv2d(net, param[0], abs(param[1]), scope=scope_prefix+'conv' + str(conv_cnt),
+                                      padding='SAME' if param[1] > 0 else "VALID")
                     conv_cnt += 1
             if self.fcs is None:
                 return net
@@ -49,12 +61,7 @@ class CNN:
 
     def __init__(self, cnn_params=Params([[16,5],2,[32,5],2], [1024]), 
                  kp=0.5, lr_init=0.05, lr_dec_rate=0.95, batch_size=128,
-                 epoch=10, verbose=False, act=tf.nn.relu, l2=5e-8, path=None,
-                 resnet_v2=None):
-        """
-        built_net: a resnet_v2. Like nets.resnet_v2.resnet_v2_50. Check source codes of tensorflow.contrib.slim.nets.resnet_v2
-            for how to make a resnet! The input images first go through built_net and then the net constructed by CNN. 
-        """
+                 epoch=10, verbose=False, act=tf.nn.relu, l2=5e-8, path=None):
         self.params = cnn_params
         self.kp = kp
         self.lr_init = lr_init
@@ -66,7 +73,6 @@ class CNN:
         self.l2 = l2
         self.path = None if path is None else mkdir(path)
         self.sess = None
-        self.resnet_v2 = resnet_v2
         self.ts = {}
         self.var_names = ['kp', 'y', 'acc', 'is_train', 'pred', 'global_step', 'loss','x', 'train_step']
 
@@ -116,8 +122,6 @@ class CNN:
         n_labels = self.Y.shape[1]
         x = tf.placeholder(tf.float32, [None, slen*slen], name='x')
         x_trans = tf.reshape(x, [-1, slen, slen, 1])
-        if self.resnet_v2 is not None:
-            x_trans = tf.image.grayscale_to_rgb(x_trans)
         kp = tf.placeholder(tf.float32, [], name='kp')
         y = tf.placeholder(tf.float32, [None, n_labels], name='y')
         is_train = tf.placeholder(tf.bool, [], name='is_train')
@@ -127,9 +131,6 @@ class CNN:
                     normalizer_fn=tf.layers.batch_normalization,
                     normalizer_params={'training': is_train, 'momentum': 0.95},
                     weights_regularizer=slim.l2_regularizer(self.l2)):
-            if self.resnet_v2 is not None:
-                net, _ = self.resnet_v2(
-                net, num_classes=None, is_training=is_train, global_pool=True)
             if self.params is not None:
                 net = self.params.construct(net, kp)
             if len(net.shape) > 2:
@@ -210,6 +211,7 @@ class CNN:
         it_pep = round(self.X.shape[0] / self.batch_size)
         x_t = self.ts['x']; kp_t = self.ts['kp']; y_t = self.ts['y']; is_train_t = self.ts['is_train']; 
         train_step_t = self.ts['train_step']; global_step_t = self.ts['global_step']
+        tf.summary.FileWriter(self.path,sess.graph)
         for i in range(round(self.epoch * self.X.shape[0] / self.batch_size)+1):
             batch_xs, batch_ys = self.next_batch()
             feed_dict = {x_t: batch_xs, kp_t: self.kp, y_t: batch_ys, is_train_t: True}
@@ -241,9 +243,10 @@ def main_mnist():
 def main_mnist_res():
     data, labels = read_mnist_dl()
     # print(data.shape)
-    data = data[:5000]
-    labels = labels[:5000]
-    cnn = CNN(path='log_resCNN',epoch=3, verbose=True, batch_size=4, resnet_v2=nets.resnet_v2.resnet_v2_50, cnn_params=None)
+    # data = data[]
+    # labels = labels[:5000]
+    cnn = CNN(path='log_resCNN',epoch=10, verbose=True, batch_size=4, cnn_params=CNN.Params(
+        [[16,5],2,[[32,5],[32,5]], 2], [1024]))
     cnn.fit(data, labels, 0.2)
 
 

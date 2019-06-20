@@ -24,17 +24,14 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"]='3'
 class ZeroNN:
     def __init__(self, 
                  common_cnn=CNN.Params([[128,3],[256,3],[128,3]],None), 
-                 #common_cnn=None,
                  policy_cnn=CNN.Params([[2,1]], []), 
                  value_cnn=CNN.Params([[1,1],1], [256]), 
-                 kp=0.5, lr_init=0.1, lr_dec_rate=0.999, batch_size=256, ckpt_idx=-1, save_epochs=2,
-                 epoch=10, verbose=None, act=tf.nn.relu, l2=5e-5, path=None, lock_model_path=None,
+                 kp=0.5, lr_init=0.25, lr_dec_rate=0.999, batch_size=256, ckpt_idx=-1, save_epochs=2,
+                 epoch=10, verbose=None, act=tf.nn.relu, l2=1e-4, path=None, lock_model_path=None,
                  num_samples=None, 
-                 resnet_v2=None, 
                  logger=None):
         """
         verbose: set verbose an integer to output the training history or None not to output
-        resnet_v2: a resnet_v2. Like nets.resnet_v2.resnet_v2_50. Check source codes of tensorflow.contrib.slim.nets.resnet_v2 for how to make a resnet! The input images first go through built_net and then the net constructed by common_cnn. 
         common_cnn: can be set 0 if you don't wanna use it.
         """
         self.common_cnn = common_cnn
@@ -63,7 +60,6 @@ class ZeroNN:
         'loss_policy', 'loss_value', 'pred_value','acc_value', 
         'pred_policy', 'loss_l2', 'loss_total', 'global_step','train_step']
         self.trained_model_paths = []
-        self.resnet_v2 = resnet_v2
 
     def print_vars(self, graph=None, vars=True, ops=True):
         if graph is None:
@@ -127,7 +123,6 @@ class ZeroNN:
             x_y_policy = self.tf_random_rotate90(x_y_policy)
             def flip(img):
                 return tf.image.random_flip_left_right(tf.image.random_flip_left_right(img))
-            # x_trans = tf.image.random_flip_left_right(tf.image.random_flip_left_right(x))
             x_y_policy = tf.map_fn(flip, x_y_policy)
             x_trans = x_y_policy[:,:,:,:4]
             y_policy_trans = x_y_policy[:,:,:,4]
@@ -149,18 +144,13 @@ class ZeroNN:
         kp = tf.placeholder(tf.float32, [], name='kp')
         is_train = tf.placeholder(tf.bool, [], name='is_train')
         x_trans, y_policy_trans = self.preprocess(x, y_policy, is_train, rows, cols)
-        output_common = x_trans
         # construct shared, policy and value networks: one way in, two ways out
         with slim.arg_scope([slim.conv2d, slim.fully_connected],
                     activation_fn=self.act,
                     normalizer_fn=tf.layers.batch_normalization,
                     normalizer_params={'training': is_train, 'momentum': 0.95},
                     weights_regularizer=slim.l2_regularizer(self.l2)):
-            if self.resnet_v2 is not None:
-                output_common, _ = self.resnet_v2(
-                output_common, num_classes=None, is_training=is_train, global_pool=False)
-            if self.common_cnn is not None:
-                output_common = self.common_cnn.construct(output_common, kp, "common_")
+            output_common = self.common_cnn.construct(x_trans, kp, "common_")
             output_policy = self.policy_cnn.construct(output_common, kp, "policy_")
             logits_policy = slim.fully_connected(output_policy, rows * cols, activation_fn=tf.nn.softmax, scope='logits_policy')
             output_value = self.value_cnn.construct(output_common, kp, "value_")
@@ -297,11 +287,12 @@ class ZeroNN:
         is_train_t = self.ts['is_train']
         train_step_t = self.ts['train_step']
         global_step_t = self.ts['global_step']
-        # sess.run(tf.assign(global_step_t, 1))
+        tf.summary.FileWriter(self.path,sess.graph)
         for i in range(round(self.epoch * self.X.shape[0] / self.batch_size)+1):
             batch_xs, batch_ys_policy, batch_ys_value = self.next_batch()
             feed_dict = {x_t: batch_xs, kp_t: self.kp, y_value_t: batch_ys_value, y_policy_t: batch_ys_policy, is_train_t: True}
             sess.run(train_step_t, feed_dict=feed_dict)
+
             # global_step = sess.run(global_step_t, feed_dict=feed_dict)
             # sess.run(tf.assign(global_step_t, tf.reduce_max([global_step_t, 1e-5]) ))
             if i % it_pep == 0:
@@ -363,6 +354,7 @@ class ZeroNN:
         return [pred_value, pred_policy]
 
 
+
 def main_sim_train():
     num_samples = 500
     rows = 5
@@ -371,7 +363,7 @@ def main_sim_train():
     X = np.random.rand(num_samples,rows,cols, channel)
     Y_value = np.random.randint(0,2,[num_samples,1], dtype=np.int8)
     Y_policy = np.random.rand(num_samples,rows*cols)
-    clf = ZeroNN(verbose=2, path='ZeroNN_test', common_cnn=None, resnet_v2=nets.resnet_v2.resnet_v2_50)
+    clf = ZeroNN(verbose=2, path='ZeroNN_test', common_cnn=None)
     # clf.fit(X, Y_policy, Y_value, 0.1)
     print(X[:2].shape)
     pred_value, pred_policy = clf.predict(X[:2])
