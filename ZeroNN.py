@@ -16,18 +16,18 @@ import log
 import copy
 from scipy import misc
 from tensorflow.contrib.slim import nets
-
+import CNN_structures
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"]='3'
 
 
 class ZeroNN:
     def __init__(self, 
-                 common_cnn=CNN.Params([[128,3],[256,3],[128,3]],None), 
+                 common_cnn=CNN.Params([[128,3],[256,3],[128,3]],CNN_structures.zeronn1), 
                  policy_cnn=CNN.Params([[2,1]], []), 
                  value_cnn=CNN.Params([[1,1],1], [256]), 
-                 kp=0.5, lr_init=0.25, lr_dec_rate=0.999, batch_size=256, ckpt_idx=-1, save_epochs=2,
-                 epoch=10, verbose=None, act=tf.nn.relu, l2=1e-4, path=None, lock_model_path=None,
+                 kp=0.5, lr_init=0.01, lr_dec_rate=0.999, batch_size=256, ckpt_idx=-1, save_epochs=2,
+                 epoch=10, verbose=None, act=tf.nn.relu, l2=1e-8, path=None, lock_model_path=None,
                  num_samples=None, 
                  logger=None):
         """

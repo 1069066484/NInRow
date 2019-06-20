@@ -1,6 +1,6 @@
 """
 @Author: Zhixin Ling
-@Description: A general and flexible CNN model. 
+@Description: A general and flexible CNN model. fully connected layers, common convolution layers and residual blocks are supported.
 """
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
@@ -11,43 +11,123 @@ from sklearn.metrics import *
 from data_utils import *
 from global_defs import *
 from tensorflow.contrib.slim import nets
-
+from tensorflow.contrib.layers.python.layers import layers
+from tensorflow.python.ops import math_ops
 
 
 class CNN:
     class Params:
         """
-        @cnns:   a list with scalars(pooling layer) or two-element list(channels, kernel_size) as its element, or use a list in list to indicate a residual block, set a kernel size negative to set paddings valid
+        @cnns:   a list with scalars(pooling layer) or two-element list(channels, kernel_size) as its element, 
+                or use a list in list to indicate a residual block, set a kernel size negative to set paddings valid. 
+                Set pooling layer scalar negative for average pooling. ResnetV2 is implemented.
             ex. [[16,5],2,[32,5],2] or [[16,5],2,[[32,5],[32,-5]], 2]
+                set a layer's first element to None to indicate this is a parallel module. The expression below means a inception module.
+            ex. 
+            [
+            [128,3],2,
+            [
+            [None,
+                    [[64,1]], 
+                    [[96,1],[128,3]],
+                    [[96,1],[128,3], [192,5]],
+                    ],
+            ]], some kind of inception.
+            [
+            [16,5],2,
+            [
+            [None,[[32,5],[32,-5]], [[32,3],[32,3]]],
+            [64,3],[64,3]
+            ]], hard to tell what the structure is
             ATTENTION: the codes do not help verify the size of the features.
         @fcs:    a list of scalars, indicating neurons of fully connected layers. Set fcs to None if you don't want the output flattened.
         """
         def __init__(self, cnns, fcs):
             self.cnns = cnns
             self.fcs = fcs
+            self.pl = 0
 
         def __str__(self):
             return '[cnn:' + str(self.cnns) + '   fcs:' + str(self.fcs) +  '    res_blocks:' + ']'
 
+        def make_pl(self, net, param):
+            features = []
+            self.pl += 1
+            scope_prefix = self.scope_prefix
+            for i, line in enumerate(param):
+                if line is None:
+                    continue
+                pl = net
+                for j, layer in enumerate(line):
+                    if isinstance(layer, int):
+                        pl = slim.max_pool2d(pl, layer, scope=scope_prefix + 'pl' + str(self.pl) + 'line' + str(i) + 'pool' + str(j))
+                        continue
+                    pl = slim.conv2d(pl, layer[0], abs(layer[1]), 
+                                                   padding='SAME' if layer[1] > 0 else "VALID",
+                                                   scope=scope_prefix + 'pl' + str(self.pl) + 'line' + str(i) + 'conv' + str(j))
+                features.append(pl)
+            net = tf.concat(features,3, scope_prefix + 'pl' + str(self.pl)+'concat')
+            return net
+
+        def make_res(self, net, param):
+            scope_prefix = self.scope_prefix
+            net = slim.batch_norm(
+                net, activation_fn=tf.nn.relu, scope=scope_prefix + 'block' + str(self.block_cnt) + 'preact')
+            residual = net
+            for layer_i, block in enumerate(param):
+                if block[0] is None:
+                    residual = self.make_pl(residual, block)
+                    continue
+                if layer_i == len(param)-1:
+                    residual = slim.conv2d(residual, block[0], abs(block[1]), padding='SAME' if block[1] > 0 else "VALID",
+                                        scope=scope_prefix + 'block' + str(self.block_cnt) + 'conv' + str(layer_i), 
+                                        normalizer_fn=None, activation_fn=None)
+                else:
+                    residual = slim.conv2d(residual, block[0], abs(block[1]), 
+                                            padding='SAME' if block[1] > 0 else "VALID",
+                                            scope=scope_prefix + 'block' + str(self.block_cnt) + 'conv' + str(layer_i))
+            if net.shape == residual.shape:
+                shortcut = net
+            else:
+                shortcut = slim.conv2d(net, int(residual.shape[-1]), 1, padding='SAME', 
+                                    normalizer_fn=None, activation_fn=None, 
+                                    scope=scope_prefix + 'block' + str(self.block_cnt) + 'shortcut')
+            net = tf.add(shortcut, residual, scope_prefix + 'block' + str(self.block_cnt) + 'merge')
+            net = tf.nn.relu(net)
+            self.block_cnt += 1
+            self.need_bn = True
+            return net
+
         def construct(self, input, keep_prob=1.0, scope_prefix=""):
             conv_cnt = 1
             pool_cnt = 1
-            block_cnt = 1
+            self.block_cnt = 1
             net = input
+            self.scope_prefix = scope_prefix
+            # we need BN after residual networks
+            self.need_bn = False
+            def try_bn():
+                if self.need_bn:
+                    self.need_bn = False
+                    net = slim.batch_norm(net, activation_fn=tf.nn.relu, scope=scope_prefix + 'block' + str(self.block_cnt) + 'postbn')
             for param in self.cnns:
                 if isinstance(param, int):
-                    net = slim.max_pool2d(net, [param,param], scope=scope_prefix + 'pool' + str(pool_cnt))
+                    try_bn()
+                    if param > 0:
+                        net = slim.max_pool2d(net, param, scope=scope_prefix + 'pool' + str(pool_cnt))
+                    else:
+                        if -param == 1:
+                            net = math_ops.reduce_mean(net, [1, 2], name=scope_prefix + 'pool' + str(pool_cnt), keepdims=True)
+                        else:
+                            net = slim.avg_pool2d(net, -param, scope=scope_prefix + 'pool' + str(pool_cnt))
                     pool_cnt += 1
+                elif param[0] is None:
+                    try_bn()
+                    net = self.make_pl(net, param)
                 elif not isinstance(param[0], int):
-                    residual = net
-                    for layer_i, block in enumerate(param):
-                        residual = slim.conv2d(residual, block[0], abs(block[1]), padding='SAME' if block[1] > 0 else "VALID",
-                                               scope=scope_prefix + 'block' + str(block_cnt) + 'conv' + str(layer_i))
-                    shortcut = slim.conv2d(net, int(residual.shape[-1]), 1, padding='SAME' ,
-                                               scope=scope_prefix + 'block' + str(block_cnt) + 'shortcut')
-                    net = shortcut + residual
-                    block_cnt += 1
+                    net = self.make_res(net, param)
                 else:
+                    try_bn()
                     net = slim.conv2d(net, param[0], abs(param[1]), scope=scope_prefix+'conv' + str(conv_cnt),
                                       padding='SAME' if param[1] > 0 else "VALID")
                     conv_cnt += 1
@@ -60,8 +140,8 @@ class CNN:
             return net
 
     def __init__(self, cnn_params=Params([[16,5],2,[32,5],2], [1024]), 
-                 kp=0.5, lr_init=0.05, lr_dec_rate=0.95, batch_size=128,
-                 epoch=10, verbose=False, act=tf.nn.relu, l2=5e-8, path=None):
+                 kp=0.5, lr_init=0.005, lr_dec_rate=0.95, batch_size=128, data_aug=True,
+                 epoch=10, verbose=False, act=tf.nn.relu, l2=1e-8, path=None):
         self.params = cnn_params
         self.kp = kp
         self.lr_init = lr_init
@@ -74,6 +154,7 @@ class CNN:
         self.path = None if path is None else mkdir(path)
         self.sess = None
         self.ts = {}
+        self.data_aug = data_aug
         self.var_names = ['kp', 'y', 'acc', 'is_train', 'pred', 'global_step', 'loss','x', 'train_step']
 
     def print_vars(self):
@@ -115,6 +196,17 @@ class CNN:
         self.init_sess(refresh_saving)
         self.train()
 
+    def preprocess(self, x, is_train):
+        def augment():
+            def flip(img):
+                return tf.image.random_flip_left_right(tf.image.random_flip_left_right(img))
+            x_trans = tf.map_fn(flip, x)
+            return x_trans
+        def no_augment():
+            return x
+        x_trans = tf.cond(is_train, augment, no_augment)
+        return x_trans
+
     def construct_model(self):
         tf.reset_default_graph()
         n_xs, slen = self.X.shape
@@ -122,20 +214,23 @@ class CNN:
         n_labels = self.Y.shape[1]
         x = tf.placeholder(tf.float32, [None, slen*slen], name='x')
         x_trans = tf.reshape(x, [-1, slen, slen, 1])
+        is_train = tf.placeholder(tf.bool, [], name='is_train')
+        if self.data_aug:
+            x_trans = self.preprocess(x_trans, is_train)
         kp = tf.placeholder(tf.float32, [], name='kp')
         y = tf.placeholder(tf.float32, [None, n_labels], name='y')
-        is_train = tf.placeholder(tf.bool, [], name='is_train')
         net = x_trans
         with slim.arg_scope([slim.conv2d, slim.fully_connected],
                     activation_fn=self.act,
                     normalizer_fn=tf.layers.batch_normalization,
                     normalizer_params={'training': is_train, 'momentum': 0.95},
                     weights_regularizer=slim.l2_regularizer(self.l2)):
-            if self.params is not None:
-                net = self.params.construct(net, kp)
-            if len(net.shape) > 2:
-                net = slim.flatten(net)
-            logits = slim.fully_connected(net, n_labels, activation_fn=None, scope='logits')
+            with slim.arg_scope([slim.batch_norm], is_training=is_train):
+                if self.params is not None:
+                    net = self.params.construct(net, kp)
+                if len(net.shape) > 2:
+                    net = slim.flatten(net)
+                logits = slim.fully_connected(net, n_labels, activation_fn=None, scope='logits')
         pred = tf.argmax(logits,1, name='pred')
         corrects = tf.equal(tf.argmax(logits,1),tf.argmax(y,1))
         acc = tf.reduce_mean(tf.cast(corrects, tf.float32),name='acc')
@@ -240,16 +335,65 @@ def main_mnist():
     cnn.fit(data, labels, 0.2)
 
 
+import CNN_structures
 def main_mnist_res():
     data, labels = read_mnist_dl()
     # print(data.shape)
     # data = data[]
     # labels = labels[:5000]
-    cnn = CNN(path='log_resCNN',epoch=10, verbose=True, batch_size=4, cnn_params=CNN.Params(
-        [[16,5],2,[[32,5],[32,5]], 2], [1024]))
-    cnn.fit(data, labels, 0.2)
+    params1 = CNN.Params(
+        [[64,3],2,[[64,3]]*2,[[64,3]]*2,[[64,3]]*2, 2, [[128,3]]*2,[[128,3]]*2,[[128,3]]*2, -1], [512])
+    params2 = CNN.Params(
+        [ [16,5],2,
+           [[None,  
+                    [[32,5],[32,5]], 
+                    [[32,3],[32,3]]],
+           [64,3],[64,3]
+            ]],
+          [512])
+    params3 = CNN.Params([
+            [128,3],2,
+            [[None,
+                    [[64,1]], 
+                    [[64,1],[96,3]],
+                    [[64,1],[96,3], [128,5]],
+                    ],
+            ]],
+            [512])
+    params4 = CNN.Params([
+            [128,3],2,
+            [[None,
+                    [[64,1]], 
+                    [[96,3]],
+                    [[128,5]],
+                    ],
+            ]],
+            [512])
+    params5 = CNN.Params([
+            [128,3],2,
+            [[None,
+                    [[64,1]], 
+                    [[96,3]],
+                    [[128,5]],
+                    ],
+            [[128,1]]
+            ]],
+            [512])
+
+    cnn = CNN(path='log_resCNN',epoch=25, verbose=True, batch_size=128, cnn_params=CNN_structures.zeronnlike, data_aug=False)
+    cnn.fit(data, labels, 0.1)
 
 
 if __name__ == "__main__":
     # main_mnist()
     main_mnist_res()
+
+
+"""
+mnist9/1-testacc: 98.8%  10epoch
+[[32,3],2,[[32,3]]*2,[[32,3]]*2,[[32,3]]*2, 2, [[64,3]]*2,[[64,3]]*2,[[64,3]]*2], [256]
+mnist9/1: train_acc:  0.999982905982906    test_acc: 0.9952307692307693  25epoch
+[[64,3],2,[[64,3]]*2,[[64,3]]*2,[[64,3]]*2, 2, [[128,3]]*2,[[128,3]]*2,[[128,3]]*2], [512]
+mnist9/1: train_acc:  0.9992991452991453    test_acc: 0.994  25epoch
+[[64,3],2,[[64,3]]*2,[[64,3]]*2,[[64,3]]*2, 2, [[128,3]]*2,[[128,3]]*2,[[128,3]]*2, -1], [512]
+"""
