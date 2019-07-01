@@ -23,11 +23,11 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"]='3'
 
 class ZeroNN:
     def __init__(self, 
-                 common_cnn=CNN.Params([[128,3],[256,3],[128,3]],CNN_structures.zeronn1), 
+                 common_cnn=CNN_structures.zeronn3, 
                  policy_cnn=CNN.Params([[2,1]], []), 
                  value_cnn=CNN.Params([[1,1],1], [256]), 
-                 kp=0.5, lr_init=0.01, lr_dec_rate=0.999, batch_size=256, ckpt_idx=-1, save_epochs=2,
-                 epoch=10, verbose=None, act=tf.nn.relu, l2=1e-8, path=None, lock_model_path=None,
+                 kp=0.5, lr_init=0.008, lr_dec_rate=0.99, batch_size=256, ckpt_idx=-1, save_epochs=2,
+                 epoch=10, verbose=None, act=tf.nn.relu, l2=1e-4, path=None, lock_model_path=None,
                  num_samples=None, 
                  logger=None):
         """
@@ -104,9 +104,10 @@ class ZeroNN:
         X should be a n*rows*cols*channels, where channels is number of histories.
         """
         self.init_training_data(X, Y_policy, Y_value, reserve_test)
-        self.construct_model()
-        self.init_hists(refresh_saving)
-        self.init_sess(refresh_saving)
+        if self.sess is None and not refresh_saving:
+            self.construct_model()
+            self.init_hists(refresh_saving)
+            self.init_sess(refresh_saving)
         self.train()
 
     def tf_random_rotate90(self, image, rotate_prob=0.5):
@@ -205,6 +206,9 @@ class ZeroNN:
         return [self.X[indices], self.Y_policy[indices], self.Y_value[indices]]
 
     def run_eval(self, X, Y_policy, Y_value):
+        if self.sess is None:
+            if not self.init_sess(refresh_saving=False):
+                raise Exception("Error: trying to evaluate without trained network")
         loss_policy_sum = 0.0
         loss_value_sum = 0.0
         loss_total_sum = 0.0
@@ -350,7 +354,9 @@ class ZeroNN:
         pred_value, pred_policy = self.sess.run([self.ts['pred_value'], self.ts['pred_policy']], feed_dict={self.ts['x']: X, 
                                         self.ts['kp']: 1.0,
                                         self.ts['is_train']: False,
-                                        self.ts['y_policy']: np.zeros([X.shape[0], X.shape[1]*X.shape[2]])})
+                                        self.ts['y_policy']: 
+                                        np.zeros([X.shape[0], X.shape[1]*X.shape[2]])
+                                        })
         return [pred_value, pred_policy]
 
 

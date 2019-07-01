@@ -50,10 +50,11 @@ class CNN:
         def __str__(self):
             return '[cnn:' + str(self.cnns) + '   fcs:' + str(self.fcs) +  '    res_blocks:' + ']'
 
-        def make_pl(self, net, param):
+        def make_pl(self, net, param, scope_prefix=None):
             features = []
             self.pl += 1
-            scope_prefix = self.scope_prefix
+            if scope_prefix is None:
+                scope_prefix = self.scope_prefix
             for i, line in enumerate(param):
                 if line is None:
                     continue
@@ -76,7 +77,7 @@ class CNN:
             residual = net
             for layer_i, block in enumerate(param):
                 if block[0] is None:
-                    residual = self.make_pl(residual, block)
+                    residual = self.make_pl(residual, block, scope_prefix + 'block' + str(self.block_cnt))
                     continue
                 if layer_i == len(param)-1:
                     residual = slim.conv2d(residual, block[0], abs(block[1]), padding='SAME' if block[1] > 0 else "VALID",
@@ -140,7 +141,7 @@ class CNN:
             return net
 
     def __init__(self, cnn_params=Params([[16,5],2,[32,5],2], [1024]), 
-                 kp=0.5, lr_init=0.005, lr_dec_rate=0.95, batch_size=128, data_aug=True,
+                 kp=0.8, lr_init=0.005, lr_dec_rate=0.95, batch_size=128, data_aug=True,
                  epoch=10, verbose=False, act=tf.nn.relu, l2=1e-8, path=None):
         self.params = cnn_params
         self.kp = kp
@@ -380,7 +381,7 @@ def main_mnist_res():
             ]],
             [512])
 
-    cnn = CNN(path='log_resCNN',epoch=25, verbose=True, batch_size=128, cnn_params=CNN_structures.zeronnlike, data_aug=False)
+    cnn = CNN(path='log_resCNN',epoch=25, verbose=True, batch_size=128, cnn_params=CNN_structures.zeronn3, data_aug=False)
     cnn.fit(data, labels, 0.1)
 
 
