@@ -97,6 +97,7 @@ class Game:
     def __init__(self, rows, cols, n_in_row, p1=Player.human, p2=Player.AI, collect_ai_hists=False):
         """
         You can use either type Player for initialization or an initialized object
+        @collect_ai_hists:  whether or not to collect ai's histories, only available if both players are AI.
         """
         self.board = Board(rows, cols)
         init_player = [AI, Human]
@@ -115,6 +116,9 @@ class Game:
             self.hists_board = []
 
     def graphics(self, to_print=''):
+        """
+        Show user interface.
+        """
         os.system('cls')
         print(to_print)
         print('\n')
@@ -138,7 +142,12 @@ class Game:
             self.hists_board.append(board)
 
     def start(self, graphics=True):
-        if graphics: self.graphics()
+        """
+        Start a game
+        @graphics:  whether or not to show UI. If this is a human-involved game, you'd better set it true.
+        """
+        if graphics: 
+            self.graphics()
         turn = 0
         grid_states = [Board.GridState.p1, Board.GridState.p2]
         act = None
@@ -146,8 +155,6 @@ class Game:
             if graphics: 
                 print('Player',turn + 1,'s turn:')
             if self.ps[turn] == Game.Player.AI:
-                # print("act=",act)
-                # input()
                 self.players[turn].mcts.enemy_move = act
             act = self.players[turn].get_valid_action()
             if act is None:
@@ -162,6 +169,7 @@ class Game:
             if graphics and self.all_ai:
                 input()
             self.collect_hists(turn)
+            # Check whether the game is over
             if termination != Termination.going:
                 if termination == Termination.won:
                     if graphics: 
@@ -192,6 +200,8 @@ class Game:
     def check_over_full(board, pos, targets):
         """
         return Termination
+        An efficient algorithm is used to check the game is over or not.
+        Time complexity os O(S), where S is the board size.
         """
         def is_pos_legal(pos):
             return board.shape[0] > pos[0] >= 0 and board.shape[1] > pos[1] >= 0
@@ -209,16 +219,25 @@ class Game:
                 pos_t = f(-1,pos_t)
             if score >= targets:
                 return Termination.won
-        return Termination.going if np.sum(bd != Grid.GRID_EMP) != bd.size else Termination.tie
+        for r in bd:
+            for g in r:
+                if g == Grid.GRID_EMP:
+                    return Termination.going
+        return Termination.tie
 
 
 def eval_mcts(rows, cols, n_in_row, mcts1, mcts2, verbose=True, sim_times=100, collect_ai_hists=False):
+    """
+    sim_times can be either a scalar or a two-element iterable, indicating the first or second player's first-move games
+    """
+    if isinstance(sim_times, int):
+        sim_times = [sim_times, sim_times]
     player1_wincnt = 0
     player2_wincnt = 0
     #inh1 = True
     ai_hists = []
     for id in range(2):
-        for i in range(sim_times):
+        for i in range(sim_times[id]):
             game = Game(rows,cols,n_in_row,Game.Player.AI,Game.Player.AI, collect_ai_hists=collect_ai_hists)
             game.players[id].mcts.from_another_mcts(mcts1)
             game.players[1-id].mcts.from_another_mcts(mcts2)
@@ -229,7 +248,7 @@ def eval_mcts(rows, cols, n_in_row, mcts1, mcts2, verbose=True, sim_times=100, c
                 print(player1_wincnt, player2_wincnt)
             if collect_ai_hists:
                 ai_hists.append(game.ai_hists())
-    sim_times += sim_times
+    sim_times = sum(sim_times)
     player1_wincnt /= sim_times
     player2_wincnt /= sim_times
     tie_rate = 1.0 - player1_wincnt - player2_wincnt

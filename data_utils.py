@@ -61,6 +61,24 @@ def curr_time_str():
     return datetime.datetime.now().strftime('%y%m%d%H%M%S')
 
 
+def read_mnist(one_hot=True):
+    from tensorflow.examples.tutorials.mnist import input_data
+    return input_data.read_data_sets(FOLDER_MNIST,one_hot=one_hot)
+
+
+def read_mnist_dl():
+    path_data = join(FOLDER_MNIST, npfn('data'))
+    path_labels = join(FOLDER_MNIST, npfn('labels'));
+    if exists(path_data):
+        return [np.load(path_data), np.load(path_labels)]
+    mnist = read_mnist()
+    dls = [np.vstack([mnist.train.images, mnist.test.images]),
+           np.vstack([mnist.train.labels, mnist.test.labels])]
+    np.save(path_data, dls[0])
+    np.save(path_labels, dls[1])
+    return dls
+
+
 def csvfile2nparr(csvfn, cols=None):
     csvfn = csvfilename(csvfn)
     csvfn = csv.reader(open(csvfn,'r'))
@@ -182,8 +200,14 @@ def test_non_repeated_random_nums():
     print(l[nums])
 
 
+def test_read_mnist_dl():
+    dls = read_mnist_dl()
+    print(dls[0].shape)
+    print(dls[1].shape)
+
+
 if __name__ == '__main__':
-    test_non_repeated_random_nums()
+    test_read_mnist_dl()
     pass
     # print(__file__)
     # print(exists('./datasets_raw'))

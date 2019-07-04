@@ -1,6 +1,6 @@
 """
 @Author: Zhixin Ling
-@Description: A general and flexible CNN model. fully connected layers, common convolution layers and residual blocks are supported.
+@Description: A general and flexible CNN model. fully connected layers, common convolution layers and residual and inception blocks are supported.
 """
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
@@ -90,6 +90,7 @@ class CNN:
             if net.shape == residual.shape:
                 shortcut = net
             else:
+                # make a convolution with a 1*1 kernel tp keep the dimensions consistent
                 shortcut = slim.conv2d(net, int(residual.shape[-1]), 1, padding='SAME', 
                                     normalizer_fn=None, activation_fn=None, 
                                     scope=scope_prefix + 'block' + str(self.block_cnt) + 'shortcut')
@@ -105,12 +106,14 @@ class CNN:
             self.block_cnt = 1
             net = input
             self.scope_prefix = scope_prefix
+
             # we need BN after residual networks
             self.need_bn = False
             def try_bn():
                 if self.need_bn:
                     self.need_bn = False
-                    net = slim.batch_norm(net, activation_fn=tf.nn.relu, scope=scope_prefix + 'block' + str(self.block_cnt) + 'postbn')
+                    net = slim.batch_norm(net, activation_fn=tf.nn.relu, 
+                                          scope=scope_prefix + 'block' + str(self.block_cnt) + 'postbn')
             for param in self.cnns:
                 if isinstance(param, int):
                     try_bn()

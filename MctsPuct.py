@@ -18,7 +18,6 @@ from queue import Queue
 # multi_evals = 0
 
 
-
 class Grid(IntEnum):
     GRID_EMP = 0
     GRID_ENY = -1
@@ -90,6 +89,7 @@ class Node:
             elif len(self.children) == 0:
                 if noexp:
                     return self, True, sim_board
+                # print("expand")
                 self.expand(sim_board)
                 return self, True, sim_board
             udeno = np.sqrt(self.visits)
@@ -117,7 +117,7 @@ class Node:
         try:
             selection = np.random.choice(range(probs.size),p=probs,size=[1])
         except:
-            print("ERROR play - probs=\n",probs)
+            print("ERROR play - probs=\n", probs, sim_board, self.children)
             return self.children[0]
         return self.children[selection[0]]
 
@@ -174,36 +174,55 @@ class Node:
         # print('self.visits',self.visits, id(self), len(self.children))
         return self.mcts.cool_probs(probs)
 
+    def default_policy(self, board):
+        if not self.mcts.usedef:
+            return 0.0
+        bd = board.copy()
+        avails = self.avails
+        np.random.shuffle(avails)
+        role = -self.role
+        for avail in avails:
+            bd[avail[0]][avail[1]] = role
+            termination = self.mcts.check_over(bd, avail)
+            if termination != game_utils.Termination.going:
+                ret = (role == self.role) * 2 - 1 if game_utils.Termination.won == termination else 0.0
+                return ret
+            role = -role
+        return 0.0
+
     def expand(self, sim_board):
         """
         We expand all children
         """
-        eval_board = self.create_eval_board(sim_board)
-        rets = self.mcts.eval_state_multi(eval_board)
-
-        # avoid deadlock or long waiting:
-        # if the evaluation queue cannot be full for a long time, just eval a single
-        # the logic here should be carefully dealt with:
-        #   if there is something unexpected with multi-eval, turn to single-eval
-        if not self.mcts.wait_for_full():
-            self.value, probs = self.mcts.eval_state_single(eval_board)
+        # print('expand')
+        # input()
+        if self.mcts.zeroNN is None:
+            # use default policy if no zeroNN is provided
+            self.value = self.default_policy(sim_board)
+            probs = self.mcts.defprobs
         else:
-            if len(rets) == 0:
+            eval_board = self.create_eval_board(sim_board)
+            rets = self.mcts.eval_state_multi(eval_board)
+            # avoid deadlock or long waiting:
+            # if the evaluation queue cannot be full for a long time, just eval a single game board
+            # the logic here should be carefully dealt with:
+            #   if there is something unexpected with multi-eval, turn to single-eval
+            if not self.mcts.wait_for_full():
                 self.value, probs = self.mcts.eval_state_single(eval_board)
             else:
-                self.value, probs = rets
-        # print(self.value)
-        # self.value *= self.role
-        # self.value = self.value * 2) * 0.5
+                if len(rets) == 0:
+                    self.value, probs = self.mcts.eval_state_single(eval_board)
+                else:
+                    self.value, probs = rets
         for r,c in self.avails:
             self.children.append(Node(self, (r,c), Grid(-self.role), sim_board.copy(), self.mcts, probs[r][c]))
 
 
 class MctsPuct:
     def __init__(self, board_rows_, board_cols_, n_target_=4, max_t_=5,
-                 max_acts_=1000, c=1.5, inherit=True, zeroNN=None, n_threads=4,
-                 multi_wait_time_s=0.25, const_temp=0, noise=0.2, temp2zero_moves=0xfffff,
-                 resign_val=0.65, split=3):
+                 max_acts_=1000, c=2.5, inherit=True, zeroNN=None, n_threads=4,
+                 multi_wait_time_s=0.030, const_temp=0, noise=0.2, temp2zero_moves=0xfffff,
+                 resign_val=0.65, split=3, usedef=True):
         """
         @board_rows_: number of rows of the game board
         @board_cols_: number of cols of the game board, recommended to be the same as board_rows_ in benefit of data augmentation
@@ -236,6 +255,7 @@ class MctsPuct:
         self.const_temp = const_temp
         self.split = split
         self.split_chance = 0.1 * split
+        self.usedef = usedef
         self.temp_reciprocal = 1.0 / const_temp if const_temp != 0 else None
         if self.temp_reciprocal  is not None:
             self.temp_reciprocal = np.clip(self.temp_reciprocal,1e-3, 1e3)
@@ -279,7 +299,7 @@ class MctsPuct:
 
     def init_syncs(self, n_threads):
         self.eval_queues = []
-        self.eval_results = [[] for _ in range(n_threads-2)]
+        self.eval_results = [[] for _ in range(n_threads)]
         self.n_threads = n_threads
         # self.threads = n_threads
         # self.locks = [threading.Lock() for _ in range(n_threads)]
@@ -292,6 +312,7 @@ class MctsPuct:
         self.max_acts = other.max_acts
         self.c = other.c
         self.inherit = other.inherit
+        self.usedef = other.usedef
         self.zeroNN = other.zeroNN
         self.noise = other.noise
         self.const_temp = other.const_temp
@@ -308,6 +329,7 @@ class MctsPuct:
         roots = [root]
         selects = []
         noexp = False
+        # print("tree_policy")
         while len(roots) != 0:
             reach_leaf = False
             selected = roots.pop()
@@ -318,7 +340,8 @@ class MctsPuct:
                 if len(selects) < self.split and np.random.rand() < self.split_chance:
                     roots.append(selected)
             selects.append(selected)
-            noexp = True
+            if reach_leaf:
+                noexp = True
         return selects
 
     def default_policy(self, node):
@@ -400,9 +423,11 @@ class MctsPuct:
         """
         return None for resign
         """
-        t = time.time()
+        # t = time.time()
         if self.is_first is None:
             self.is_first = (np.sum(board) == 0)
+            self.defprobs = np.zeros((self.board_rows, self.board_cols)) +\
+                1.0/ self.board_cols / self.board_rows
         self.eval_queues = []
         self.search_over = 0
         self.root = self.simulate(board.copy())
@@ -412,10 +437,12 @@ class MctsPuct:
         self.moves += 1
         if self.moves > self.temp2zero_moves:
             self.const_temp = 0
-
         '''
-        value, policy = self.eval_state_single(self.root.create_eval_board(board.copy()))
-        
+        if self.zeroNN is not None:
+            value, policy = self.eval_state_single(self.root.create_eval_board(board.copy()))
+        else:
+            value = 0.0
+            policy = 0.0
         np.set_printoptions(4, suppress=True)
         print('self.root.value:',self.root.value /self.root.visits )
         print('value:',value)
@@ -425,6 +452,7 @@ class MctsPuct:
         print(self.root.children_values(board))
         print("root.children_visits")
         print(self.root.children_visits(board))
+        print("time=",time.time()-t)
         # print(self.root.print_eval_board(self.root_sim_board))
         # m = board.copy()
         # best.move_sim_board(m)
@@ -464,11 +492,7 @@ class MctsPuct:
         self.eval_results[idx] = []
         lres = len(self.eval_results)
         if idx + 1 == lres or self.search_over != 0:
-            if self.zeroNN is None:
-                value = np.zeros([lres, 1])
-                policy = np.zeros((lres, board.shape[0], board.shape[1])) + 1.0/ board.shape[0] / board.shape[1]
-            else:
-                value, policy = self.zeroNN.predict(np.array(self.eval_queues))
+            value, policy = self.zeroNN.predict(np.array(self.eval_queues))
             self.eval_queues = []
             policy = policy.reshape([-1] + list(board.shape[:-1]))
             for i in range(idx+1):
@@ -484,23 +508,5 @@ class MctsPuct:
         Use NN to evaluate the current game state, return a double-element list [value, policy]
             value is a scalar while policy is a board_rows*board_cols matrix
         """
-        # global sing_evals
-        # sing_evals += 1
-        if self.zeroNN is None:
-            return 0.0, np.zeros((board.shape[0], board.shape[1])) + 1.0/ board.shape[0] / board.shape[1]
-        # self.eval_lock.acquire()
-        # t = time.time()
         value, policy = self.zeroNN.predict(board.reshape([1]+list(board.shape)))
-        # print("single eval time=", time.time() - t )
-        # self.eval_lock.release()
         return value[0][0], policy.reshape([-1] + list(board.shape[:-1]))[0]
-
-
-"""
-[[ 7,  4, 15, 16, 10, 10,],
- [ 6, 10, 20, 17, 12, 17,],
- [ 8, 10, 15, 16, 23, 13,],
- [ 9, 11, 11, 13, 10, 17,],
- [20,  9, 17,  5, 12,  9,],
- [14, 14, 17, 10, 26,  7,]]
-"""
