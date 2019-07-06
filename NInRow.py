@@ -29,18 +29,28 @@ def main_exe():
     game.start()
     input("Press any key to exit")
 
-
+"""
+[[153. 173. 213. 195. 125.]
+ [309. 210. 386. 282. 254.]
+ [225. 217. 670. 360. 333.]
+ [170. 165. 184. 301. 169.]
+ [195. 201. 140. 265.  75.]]
+"""
 from ZeroNN import *
 def main_debug():
-    game = Game(5,5,4,Game.Player.AI,Game.Player.AI,collect_ai_hists=False)
+    game = Game(3,3,3, Game.Player.AI, Game.Player.AI, collect_ai_hists=False)
     # zeroNN = ZeroNN(path=join(FOLDER_ZERO_NNS, 'NNs'), ckpt_idx=join(FOLDER_ZERO_NNS, 'NNs/model.ckpt-188'))
-    zeroNN1 = ZeroNN(path=join(FOLDER_ZERO_NNS, 'NNs'), ckpt_idx= 'zero_nns/NNs/model.ckpt-84313')#join(FOLDER_ZERO_NNS, 'NNs/model.ckpt-64015'))
+    zeroNN1 = ZeroNN(path=join(FOLDER_ZERO_NNS + '664', 'NNs'), 
+                        ckpt_idx=join(FOLDER_ZERO_NNS + '664', 'NNs/model.ckpt-49702'))
     zeroNN = None
     game.players[0].mcts.zeroNN = None
-    game.players[0].mcts.max_acts = 1024
+    game.players[0].mcts.max_acts = max_acts
+    game.players[0].mcts.max_update = max_update
+    game.start(graphics=True)
 
-    game.players[1].mcts.zeroNN = zeroNN1
-    game.players[1].mcts.max_acts = 512
+    game.players[1].mcts.max_update = 16
+    game.players[1].mcts.zeroNN = None
+    game.players[1].mcts.max_acts = 1024 * 2
     game.start(graphics=True)
     print("over")
     return None

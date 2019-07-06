@@ -61,5 +61,35 @@ def p_test():
     print(game.players[0].mcts.fix_p, game.players[1].mcts.fix_p)
 
 
+def update_test():
+    max_update1 = 4
+    max_update2 = 1
+    mcts1 = Mcts(0,0,0,5,256, max_update=max_update1)
+    mcts2 = Mcts(0,0,0,5,256, max_update=max_update2)
+    player1_winprob, player2_winprob, tieprob, _ = eval_mcts(5,5,4,mcts1,mcts2,sim_times=100, verbose=True)
+    print('\n max_update:',max_update1,max_update2,'\n',
+            ' w:    ', player1_winprob, player2_winprob, tieprob)
+"""
+
+"""
+
+
+def split_test():
+    mcts1 = Mcts(0,0,0,5,256, max_update=0, split=0)
+    mcts2 = Mcts(0,0,0,5,256, max_update=0, split=2)
+    player1_winprob, player2_winprob, tie, _ = eval_mcts(5,5,4,mcts1,mcts2,sim_times=50, verbose=True)
+    print('\n split:',0,2,'\n',
+            ' w:    ', player1_winprob, player2_winprob, tie)
+"""
+ split: 0 1
+  w:     0.45 0.49 0.06000000000000005
+
+ split: 0 2
+  w:     0.43 0.47 0.10000000000000009
+"""
+
+
+
 if __name__=='__main__':
-    penelty_test()
+    update_test()
+    # split_test()

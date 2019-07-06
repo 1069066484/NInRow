@@ -12,7 +12,7 @@ from ZeroNN import ZeroNN
 import time
 import threading
 from queue import Queue
-
+import random
 
 # sing_evals = 0
 # multi_evals = 0
@@ -51,6 +51,7 @@ class Node:
         self.unvisited = self.avails.copy()
         self.p = p 
         self.lock = threading.Lock()
+        self.last_child = None
 
     def value_visit_plus(self, value, visits):
         with self.lock:
@@ -92,6 +93,9 @@ class Node:
                 # print("expand")
                 self.expand(sim_board)
                 return self, True, sim_board
+        if True or self.last_child is None or\
+                self.visits < 25 or 0 == self.visits % self.mcts.max_update:
+                # self.mcts.max_update > (random.random() ** 2) * self.visits:
             udeno = np.sqrt(self.visits)
             if self.parent is None and self.mcts.noise != 0:
                 # add noise for children of the root
@@ -100,7 +104,10 @@ class Node:
                 best = max(self.children, key=lambda child: child.puct(udeno, noises))
             else:
                 best = max(self.children, key=lambda child: child.puct(udeno))
-            best.move_sim_board(sim_board)
+            self.last_child = best
+        else:
+            best = self.last_child
+        best.move_sim_board(sim_board)
         return best, False, sim_board
 
     def puct(self, udeno, noise=None):
@@ -111,10 +118,10 @@ class Node:
                     udeno / (self.visits+1)
 
     def play(self, sim_board):
-        probs = self.mcts.cool_probs(
-            np.array([child.visits for child in self.children], dtype=np.float64))
-        # for child in self.children:
         try:
+            probs = self.mcts.cool_probs(
+                np.array([child.visits for child in self.children], dtype=np.float64))
+            # for child in self.children:
             selection = np.random.choice(range(probs.size),p=probs,size=[1])
         except:
             print("ERROR play - probs=\n", probs, sim_board, self.children)
@@ -222,7 +229,7 @@ class MctsPuct:
     def __init__(self, board_rows_, board_cols_, n_target_=4, max_t_=5,
                  max_acts_=1000, c=2.5, inherit=True, zeroNN=None, n_threads=4,
                  multi_wait_time_s=0.030, const_temp=0, noise=0.2, temp2zero_moves=0xfffff,
-                 resign_val=0.65, split=3, usedef=True):
+                 resign_val=0.65, split=2, usedef=True, max_update=0xffff):
         """
         @board_rows_: number of rows of the game board
         @board_cols_: number of cols of the game board, recommended to be the same as board_rows_ in benefit of data augmentation
@@ -239,6 +246,8 @@ class MctsPuct:
         @noise: the noise applied to the prior probability P.
         @temp2zero_moves: after temp2zero_moves moves, const_temp would be set 0
         @resign_val: once enemy's win rate is evluated more than resign_val, then resign
+        @max_update: the smaller it is, the more frequently the best child will be updated 
+            and, as a result, more time the computation will take.
         """
         self.n_target = n_target_
         self.max_t = max_t_
@@ -249,6 +258,7 @@ class MctsPuct:
         self.last_best = None
         self.inherit = inherit
         self.zeroNN = zeroNN
+        self.max_update = max_update
         self.enemy_move = None
         self.init_syncs(n_threads)
         self.multi_wait_time_s = multi_wait_time_s
@@ -308,6 +318,7 @@ class MctsPuct:
         self.search_over = 0
 
     def from_another_mcts(self, other):
+        self.max_update = other.max_update
         self.max_t = other.max_t
         self.max_acts = other.max_acts
         self.c = other.c
@@ -423,7 +434,7 @@ class MctsPuct:
         """
         return None for resign
         """
-        # t = time.time()
+        t = time.time()
         if self.is_first is None:
             self.is_first = (np.sum(board) == 0)
             self.defprobs = np.zeros((self.board_rows, self.board_cols)) +\
