@@ -26,7 +26,7 @@ class ZeroNNTrainer:
     The details are elaborated in the paper 'Mastering the game of Go without human knowledge'.
     """
     def __init__(self, folder, board_rows=int(rcn[0]), board_cols=int(rcn[1]), n_in_row=int(rcn[2]), 
-                 train_ratio=0.15, train_size=128*1024, mcts_sims=1024, self_play_cnt=10000, reinit=False, batch_size=512, verbose=True, n_eval_threads=2, best_player_path=-1, n_play_threads=3, plays=20, start_nozero=True):
+                 train_ratio=0.35, train_size=128*1024, mcts_sims=1024, self_play_cnt=10000, reinit=False, batch_size=512, verbose=True, n_eval_threads=2, best_player_path=-1, n_play_threads=3, plays=10, start_nozero=True):
         self.board_rows = board_rows
         self.board_cols = board_cols
         self.self_play_cnt = self_play_cnt
@@ -110,7 +110,7 @@ class ZeroNNTrainer:
             try:
                 if cmd == 'md':
                     folder = input('Input the folder name where the three data file(np file) exists. '+
-                     'The files should be named [selfplay0.npy], [selfplay1.npy] and [selfplay2.npy]')
+                     'The files should be named [selfplay0.npy], [selfplay1.npy] and [selfplay2.npy]:\n')
                     try:
                         data_path = [join(folder, npfn('selfplay' + str(i))) for i in range(3)]
                         train_data = [np.load(p) for p in data_path]
@@ -123,7 +123,7 @@ class ZeroNNTrainer:
                     except:
                         print("md error: folder or files do not exist or are invalid")
                 elif cmd == 'pl':
-                    plays = input("Input the number of games for one self-play, it should be a positive even number")
+                    plays = input("Input the number of games for one self-play, it should be a positive even number:\n")
                     def plerr():
                         print("pl error: ",plays," is invalid to be a self-play number")
                     try:
@@ -136,7 +136,7 @@ class ZeroNNTrainer:
                     except:
                         plerr()
                 elif cmd == 'bs':
-                    batch_size = input("Input the number of batch size, it should be a positive number")
+                    batch_size = input("Input the number of batch size, it should be a positive number:\n")
                     def bserr():
                         print("bs error")
                     try:
@@ -149,8 +149,8 @@ class ZeroNNTrainer:
                     except:
                         bserr()
                 elif cmd == 'bp':
-                    best_player_path = input("Input num best player path, th current is " + str(self.best_player_path))
-                    if os.path.exists(self.best_player_path):
+                    best_player_path = input("Input num best player path, th current is " + str(self.best_player_path) + ":\n")
+                    if os.path.exists(self.best_player_path + '.index'):
                         self.best_player_path = best_player_path
                         print("best player path -> ", self.best_player_path)
                     else:
@@ -159,7 +159,7 @@ class ZeroNNTrainer:
                     def nmerr():
                         print("nm error")
                     nozero_mcts_sims = input("Input number of simulations of nozero_mcts's search. A non-positive number means deactivation\n" + 
-                                             " Currently, nozero_mcts is " + str(self.nozero_mcts) + ". And nozero_mcts_sims is " + str(self.nozero_mcts_sims))
+                                             " Currently, nozero_mcts is " + str(self.nozero_mcts) + ". And nozero_mcts_sims is " + str(self.nozero_mcts_sims) + ":\n")
                     try:
                         nozero_mcts_sims = int(nozero_mcts_sims)
                         if nozero_mcts_sims > 0:
@@ -175,15 +175,22 @@ class ZeroNNTrainer:
                     print("Start an optimization now")
                     self.data_avail = True
                 elif cmd == 'pc':
-                    self_play_cnt = input("Input number of play count")
+                    self_play_cnt = input("Input number of play count:\n")
                     try:
                         self_play_cnt = int(self_play_cnt)
                         self.self_play_cnt = max(self_play_cnt,0)
                         print("self.self_play_cnt -> ", self.self_play_cnt)
                     except:
                         print("pc error")
+                elif cmd == 'te':
+                    # use te will clear the screen
+                    game = Game(self.board_rows,self.board_cols,self.n_in_row, Game.Player.AI, Game.Player.human, collect_ai_hists=False)
+                    zeroNN1 = ZeroNN(path=join(self.folder_NNs), ckpt_idx=-1)
+                    game.players[0].mcts.zeroNN = zeroNN1
+                    game.players[0].mcts.max_acts = self.mcts_sims
+                    game.start(graphics=True)
                 else:
-                    print("command error.")
+                    print("command error. (cmd=",cmd ,")")
             except:
                 print("Unknown console error!")
 

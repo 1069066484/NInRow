@@ -6,22 +6,16 @@
 """
 import numpy as np
 from enum import IntEnum
-import game_utils
 from ZeroNN import ZeroNN
 #from CNN import CNN
 import time
 import threading
 from queue import Queue
 import random
-
+import copy
+from Termination import *
 # sing_evals = 0
 # multi_evals = 0
-
-
-class Grid(IntEnum):
-    GRID_EMP = 0
-    GRID_ENY = -1
-    GRID_SEL = -GRID_ENY
 
 
 class SearchOver(Exception):
@@ -30,28 +24,40 @@ class SearchOver(Exception):
 
 
 class Node:
-    def __init__(self, parent=None, move=None, role=None, sim_board=None, mcts=None, p=0.0):
+    def __init__(self, parent, move, role, sim_board, mcts, p=0.0):
         self.visits = 0
-
-        # the value is used for parent's selection, is the win prob after this move
-        # the parent node select according to this value
-        # the value is correponsing to role
-        self.value = 0.0
         # the role is the executor of the move
         self.role = role
         self.mcts = mcts
         self.parent = parent
         self.move = move
+        # the value is used for parent's selection, is the win prob after this move
+        # the parent node select according to this value
+        # the value is correponsing to role
+        won_val_self = self.won_val(role, sim_board)
+        self.won = won_val_self[0]
+        self.value = max(won_val_self[1], self.won_val(-role, sim_board)[1] * 0.9) * 0.8 \
+            if mcts.further_check else 0
         self.move_sim_board(sim_board)
-        self.won = self.mcts.check_over(sim_board, move) if move is not None else game_utils.Termination.going
-        if self.won == game_utils.Termination.won:
-            parent.children = [self]
         self.children = []
         self.avails = self.init_avails(sim_board) #empty grids
         self.unvisited = self.avails.copy()
         self.p = p 
         self.lock = threading.Lock()
         self.last_child = None
+
+    def check_best_child(self):
+        if self.mcts.further_check:
+            children = [child for child in self.children if child.won == Termination.won or child.value > 0.99 ]
+            if len(children) != 0:
+                self.children = children
+
+    def won_val(self, role, sim_board):
+        if self.move is None:
+            return [Termination.going, 0]
+        sim_board[self.move[0]][self.move[1]] = role
+        return self.mcts.check_over(sim_board, self.move, True)
+
 
     def value_visit_plus(self, value, visits):
         with self.lock:
@@ -79,16 +85,15 @@ class Node:
     def move_sim_board(self, sim_board):
         if self.move is not None:
             sim_board[self.move[0]][self.move[1]] = self.role
-        return sim_board
 
     def select(self, sim_board, noexp=False):
         # return whether expanded
         # According to PUCT algorithm, selection for simulation is NON-probabilistic! 
         with self.lock:
-            if self.won != game_utils.Termination.going:
+            if self.won != Termination.going:
                 return self, False, sim_board
             elif len(self.children) == 0:
-                if noexp:
+                if noexp and self.parent is not None:
                     return self, True, sim_board
                 # print("expand")
                 self.expand(sim_board)
@@ -117,14 +122,17 @@ class Node:
                 self.mcts.c * (self.p * (1 - self.mcts.noise) + self.mcts.noise * noise) *\
                     udeno / (self.visits+1)
 
-    def play(self, sim_board):
+    def play(self):
+        probs = None
         try:
+            if self.mcts.const_temp == 0:
+                return max(self.children, key=lambda child: child.visits)
             probs = self.mcts.cool_probs(
                 np.array([child.visits for child in self.children], dtype=np.float64))
             # for child in self.children:
             selection = np.random.choice(range(probs.size),p=probs,size=[1])
         except:
-            print("ERROR play - probs=\n", probs, sim_board, self.children)
+            print("ERROR play - probs=\n", probs, self.children)
             return self.children[0]
         return self.children[selection[0]]
 
@@ -182,17 +190,19 @@ class Node:
         return self.mcts.cool_probs(probs)
 
     def default_policy(self, board):
-        if not self.mcts.usedef:
+        if self.mcts.usedef is None:
             return 0.0
         bd = board.copy()
-        avails = self.avails
+        avails = copy.deepcopy(self.avails)
         np.random.shuffle(avails)
         role = -self.role
         for avail in avails:
             bd[avail[0]][avail[1]] = role
-            termination = self.mcts.check_over(bd, avail)
-            if termination != game_utils.Termination.going:
-                ret = (role == self.role) * 2 - 1 if game_utils.Termination.won == termination else 0.0
+            termination, val = self.mcts.check_over(bd, avail, True)
+            if val != 0 and self.mcts.usedef:
+                return val if (role == self.role) else -val
+            if termination != Termination.going:
+                ret = (role == self.role) * 2 - 1 if Termination.won == termination else 0.0
                 return ret
             role = -role
         return 0.0
@@ -201,13 +211,17 @@ class Node:
         """
         We expand all children
         """
-        # print('expand')
-        # input()
         if self.mcts.zeroNN is None:
             # use default policy if no zeroNN is provided
-            self.value = self.default_policy(sim_board)
+            if self.value == 0:
+                self.value = self.default_policy(sim_board) / ((len(self.avails) + 1) ** 0.5)
+            else:
+                self.value *= (0.8 + (Grid.GRID_ENY == self.role) * 0.1)
             probs = self.mcts.defprobs
         else:
+            value = 0
+            if self.value != 0:
+                value = self.value * (0.85 + (Grid.GRID_ENY == self.role) * 0.15)
             eval_board = self.create_eval_board(sim_board)
             rets = self.mcts.eval_state_multi(eval_board)
             # avoid deadlock or long waiting:
@@ -221,15 +235,17 @@ class Node:
                     self.value, probs = self.mcts.eval_state_single(eval_board)
                 else:
                     self.value, probs = rets
-        for r,c in self.avails:
-            self.children.append(Node(self, (r,c), Grid(-self.role), sim_board.copy(), self.mcts, probs[r][c]))
+            if value != 0:
+                self.value = value * 0.5 + self.value * 0.5
+        self.children = [Node(self, (r,c), Grid(-self.role), sim_board.copy(), self.mcts, probs[r][c]) for r,c in self.avails]
+        self.check_best_child()
 
 
 class MctsPuct:
     def __init__(self, board_rows_, board_cols_, n_target_=4, max_t_=5,
-                 max_acts_=1000, c=2.5, inherit=True, zeroNN=None, n_threads=4,
+                 max_acts_=1000, c=3, inherit=True, zeroNN=None, n_threads=4,
                  multi_wait_time_s=0.030, const_temp=0, noise=0.2, temp2zero_moves=0xfffff,
-                 resign_val=0.65, split=2, usedef=True, max_update=0xffff):
+                 resign_val=0.85, split=2, usedef=True, max_update=0xffff, further_check=True):
         """
         @board_rows_: number of rows of the game board
         @board_cols_: number of cols of the game board, recommended to be the same as board_rows_ in benefit of data augmentation
@@ -248,6 +264,7 @@ class MctsPuct:
         @resign_val: once enemy's win rate is evluated more than resign_val, then resign
         @max_update: the smaller it is, the more frequently the best child will be updated 
             and, as a result, more time the computation will take.
+        @usedef: set None not to use default policy, or False no to use handcrafted estimated value
         """
         self.n_target = n_target_
         self.max_t = max_t_
@@ -257,6 +274,7 @@ class MctsPuct:
         self.c = c
         self.last_best = None
         self.inherit = inherit
+        self.further_check = further_check
         self.zeroNN = zeroNN
         self.max_update = max_update
         self.enemy_move = None
@@ -264,7 +282,7 @@ class MctsPuct:
         self.multi_wait_time_s = multi_wait_time_s
         self.const_temp = const_temp
         self.split = split
-        self.split_chance = 0.1 * split
+        self.split_chance = 0.05 * split
         self.usedef = usedef
         self.temp_reciprocal = 1.0 / const_temp if const_temp != 0 else None
         if self.temp_reciprocal  is not None:
@@ -311,8 +329,6 @@ class MctsPuct:
         self.eval_queues = []
         self.eval_results = [[] for _ in range(n_threads)]
         self.n_threads = n_threads
-        # self.threads = n_threads
-        # self.locks = [threading.Lock() for _ in range(n_threads)]
         self.eval_lock = threading.Lock()
         self.eval_event = threading.Event()
         self.search_over = 0
@@ -324,6 +340,7 @@ class MctsPuct:
         self.c = other.c
         self.inherit = other.inherit
         self.usedef = other.usedef
+        self.further_check = other.further_check
         self.zeroNN = other.zeroNN
         self.noise = other.noise
         self.const_temp = other.const_temp
@@ -337,42 +354,26 @@ class MctsPuct:
         self.from_another_mcts(other)
 
     def tree_policy(self, root, sim_board):
-        roots = [root]
+        roots = [[root, sim_board]]
         selects = []
         noexp = False
         # print("tree_policy")
         while len(roots) != 0:
             reach_leaf = False
-            selected = roots.pop()
-            while not reach_leaf and selected.won == game_utils.Termination.going:
+            selected, sim_board = roots.pop()
+            while not reach_leaf and selected.won == Termination.going:
                 if len(selects) == 0:
                     selected.value_visit_plus(self.virtual_value_plus, self.virtual_visits_plus)
                 selected, reach_leaf, sim_board = selected.select(sim_board, noexp)
                 if len(selects) < self.split and np.random.rand() < self.split_chance:
-                    roots.append(selected)
+                    roots.append([selected, sim_board.copy()])
             selects.append(selected)
             if reach_leaf:
                 noexp = True
         return selects
 
-    def default_policy(self, node):
-        """
-        MctsPuct does not use default_policy according to alphaGo Zero
-        """
-        bd = node.sim_board
-        avails = node.avails
-        np.random.shuffle(avails)
-        role = Grid(-node.role)
-        for avail in avails:
-            bd[avail[0]][avail[1]] = role
-            termination = self.check_over(bd, avail)
-            if termination != game_utils.Termination.going:
-                return role if game_utils.Termination.won == termination else None
-            role = Grid(-role)
-        return None
-
-    def check_over(self, bd, pos):
-        return game_utils.Game.check_over_full(bd, pos, self.n_target)
+    def check_over(self, bd, pos, ret_val=False):
+        return check_over_full(bd, pos, self.n_target, ret_val)
 
     def backup(self, nodes):
         """
@@ -383,8 +384,8 @@ class MctsPuct:
         virtual_value_plus = self.virtual_value_plus
         virtual_visits_plus = self.virtual_visits_plus
         for node in nodes:
-            win_rate = node.value * node.role if node.won == game_utils.Termination.going \
-                else float(0 if node.won == game_utils.Termination.tie else node.role)
+            win_rate = node.value * node.role if node.won == Termination.going \
+                else float(0 if node.won == Termination.tie else node.role)
             # if this is a newly expanded node, 
             #   do not back up value since its value has been updated on expansion
             #   and do not apply virtual loss to visits since this is its first visit
@@ -412,13 +413,13 @@ class MctsPuct:
             # print("enemy_move=",enemy_move)
             root = self.last_best.search_child_move(enemy_move)
             # print("root=",root)
-            if root is None: root = Node(None, enemy_move, Grid.GRID_ENY, board.copy(), self)
+            if root is None: 
+                root = Node(None, enemy_move, Grid.GRID_ENY, board.copy(), self)
             # else: print("GOT root")
             # input()
         root.parent = None
-        num_acts = self.max_acts / self.n_threads
-        self.tmp = root
-        threads = [threading.Thread(target=self.simulate_thread_fun, args=(root, board, num_acts, i)) 
+        num_acts = self.max_acts // self.n_threads
+        threads = [threading.Thread(target=self.simulate_thread_fun, args=(root, board.copy(), num_acts, i)) 
                    for i in range(self.n_threads)]
         for thread in threads:
             thread.start()
@@ -442,40 +443,34 @@ class MctsPuct:
         self.eval_queues = []
         self.search_over = 0
         self.root = self.simulate(board.copy())
-        best = self.root.play(board.copy())
+        best = self.root.play()
         self.root_sim_board = board.copy()
         self.last_best = best
         self.moves += 1
         if self.moves > self.temp2zero_moves:
             self.const_temp = 0
-        '''
-        if self.zeroNN is not None:
-            value, policy = self.eval_state_single(self.root.create_eval_board(board.copy()))
-        else:
-            value = 0.0
-            policy = 0.0
-        np.set_printoptions(4, suppress=True)
-        print('self.root.value:',self.root.value /self.root.visits )
-        print('value:',value)
-        print('policy:\n',policy)
-        print('probs:\n',self.root.probs(board))
-        print("root.children_values")
-        print(self.root.children_values(board))
-        print("root.children_visits")
-        print(self.root.children_visits(board))
-        print("time=",time.time()-t)
-        # print(self.root.print_eval_board(self.root_sim_board))
-        # m = board.copy()
-        # best.move_sim_board(m)
-        # print("best")
-        
-        # print(self.root.role)
-        # print(self.root.print_eval_board(self.root_sim_board))
-        # print(self.last_best.role)
-        # print(self.last_best.print_eval_board(best.move_sim_board(board.copy())))
-        # print('selection used',time.time() - t, multi_evals, sing_evals)
-        input()
-        '''
+
+        if False:
+            if self.zeroNN is not None:
+                value, policy = self.eval_state_single(self.root.create_eval_board(board.copy()))
+            else:
+                value = 0.0
+                policy = 0.0
+            np.set_printoptions(4, suppress=True)
+            print('self.root.value:',self.root.value /self.root.visits )
+            print('value:',value)
+            print('policy:\n',policy)
+            print('probs:\n',self.root.probs(board))
+            print("root.children_values")
+            print(self.root.children_values(board))
+            print("root.children_visits")
+            print(self.root.children_visits(board))
+            print("time=",time.time()-t)
+            print("best:")
+            print(best.play().move)
+            print(best.children_values(board))
+            print(best.children_visits(board))
+            input()
 
         if self.root.value /self.root.visits >= self.resign_val:
             return None

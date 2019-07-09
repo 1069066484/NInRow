@@ -9,23 +9,10 @@ import numpy as np
 from enum import IntEnum
 from MctsPuct import MctsPuct as Mcts, Grid
 # from MctsUct import MctsUct as Mcts, Grid
+from Termination import *
 import os
 import sys
 import copy
-
-
-move_funs = [
-    lambda i,p:(p[0]+i,p[i]+i),
-    lambda i,p:(p[0]-i,p[i]+i),
-    lambda i,p:(p[0],p[i]+i),
-    lambda i,p:(p[0]+i,p[i])
-    ]
-
-
-class Termination(IntEnum):
-    going = 100
-    won = 101
-    tie = 102
 
 
 class AI:
@@ -194,36 +181,7 @@ class Game:
         return [self.hists_prob, self.hists_board, self.winner] if self.collect_ai_hists else None
 
     def check_over(self, pos):
-        return Game.check_over_full(self.board.board, pos, self.n_in_row)
-
-    @staticmethod
-    def check_over_full(board, pos, targets):
-        """
-        return Termination
-        An efficient algorithm is used to check the game is over or not.
-        Time complexity os O(S), where S is the board size.
-        """
-        def is_pos_legal(pos):
-            return board.shape[0] > pos[0] >= 0 and board.shape[1] > pos[1] >= 0
-        bd = board
-        for f in move_funs:
-            role = bd[pos[0]][pos[1]]
-            score = 0
-            pos_t = pos
-            while is_pos_legal(pos_t) and bd[pos_t[0]][pos_t[1]] == role:
-                score += 1
-                pos_t = f(1,pos_t)
-            pos_t = f(-1,pos)
-            while is_pos_legal(pos_t) and bd[pos_t[0]][pos_t[1]] == role:
-                score += 1
-                pos_t = f(-1,pos_t)
-            if score >= targets:
-                return Termination.won
-        for r in bd:
-            for g in r:
-                if g == Grid.GRID_EMP:
-                    return Termination.going
-        return Termination.tie
+        return check_over_full(self.board.board, pos, self.n_in_row)
 
 
 def eval_mcts(rows, cols, n_in_row, mcts1, mcts2, verbose=True, sim_times=100, collect_ai_hists=False):
@@ -255,6 +213,4 @@ def eval_mcts(rows, cols, n_in_row, mcts1, mcts2, verbose=True, sim_times=100, c
     return [player1_wincnt, player2_wincnt, tie_rate, ai_hists]
 
 
-if __name__=='__main__':
-    t = Game.Player.AI
-    print(type(t), isinstance(t, Game.Player))
+

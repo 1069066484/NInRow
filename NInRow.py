@@ -38,19 +38,19 @@ def main_exe():
 """
 from ZeroNN import *
 def main_debug():
-    game = Game(3,3,3, Game.Player.AI, Game.Player.AI, collect_ai_hists=False)
-    # zeroNN = ZeroNN(path=join(FOLDER_ZERO_NNS, 'NNs'), ckpt_idx=join(FOLDER_ZERO_NNS, 'NNs/model.ckpt-188'))
-    zeroNN1 = ZeroNN(path=join(FOLDER_ZERO_NNS + '664', 'NNs'), 
-                        ckpt_idx=join(FOLDER_ZERO_NNS + '664', 'NNs/model.ckpt-49702'))
+    game = Game(6,6,4, Game.Player.AI, Game.Player.human, collect_ai_hists=False)
+    zeroNN1 = ZeroNN(path=join(FOLDER_ZERO_NNS + '885', 'NNs'), 
+                        ckpt_idx=join(FOLDER_ZERO_NNS + '885', 'NNs/model.ckpt-1176'))
+    zeroNN2 = ZeroNN(path=join(FOLDER_ZERO_NNS + '885', 'NNs'), 
+                        ckpt_idx=join(FOLDER_ZERO_NNS + '885', 'NNs/model.ckpt-2878'))
     zeroNN = None
     game.players[0].mcts.zeroNN = None
-    game.players[0].mcts.max_acts = max_acts
-    game.players[0].mcts.max_update = max_update
-    game.start(graphics=True)
+    game.players[0].mcts.max_acts = 512 
+    # game.players[0].mcts.further_check = False
 
-    game.players[1].mcts.max_update = 16
-    game.players[1].mcts.zeroNN = None
-    game.players[1].mcts.max_acts = 1024 * 2
+    # game.players[1].mcts.zeroNN = None
+    # game.players[1].mcts.max_acts = 512 
+
     game.start(graphics=True)
     print("over")
     return None
@@ -69,14 +69,15 @@ def main_debug():
 
 def eval_debug():
     # zeroNN1 = ZeroNN(verbose=False,path=join(FOLDER_ZERO_NNS, 'NNs'))
-    zeroNN1 = None
+    zeroNN1 = ZeroNN(path=join(FOLDER_ZERO_NNS + '885', 'NNs'), 
+                        ckpt_idx=join(FOLDER_ZERO_NNS + '885', 'NNs/model.ckpt-1176'))
     # zeroNN2 = ZeroNN(verbose=False,path=join(FOLDER_ZERO_NNS, 'NNs'))
-    zeroNN2 = ZeroNN(verbose=False,path=join(FOLDER_ZERO_NNS, 'NNs'), ckpt_idx=join(FOLDER_ZERO_NNS, 'NNs/model.ckpt-44793'))
-    zeroNN2 = None
-    mcts1 = Mcts(0,0,zeroNN=zeroNN1,max_acts_=512)
-    mcts2 = Mcts(0,0,zeroNN=zeroNN2,max_acts_=2048)
+    zeroNN2 = ZeroNN(path=join(FOLDER_ZERO_NNS + '885', 'NNs'), 
+                        ckpt_idx=join(FOLDER_ZERO_NNS + '885', 'NNs/model.ckpt-1857'))
+    mcts1 = Mcts(0,0,zeroNN=zeroNN1,max_acts_=64)
+    mcts2 = Mcts(0,0,zeroNN=zeroNN2,max_acts_=64)
     winrate1, winrate2, tie_rate, ai_hists = \
-        eval_mcts(5, 5, 4, mcts1, mcts2, True, 10, True)
+        eval_mcts(8, 8, 5, mcts1, mcts2, True, 2, True)
     print(winrate1, winrate2, tie_rate)
     '''
     

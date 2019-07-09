@@ -89,7 +89,35 @@ def split_test():
 """
 
 
+def nzprob_enh_test():
+    mcts1 = Mcts(0,0,0,5,256, nzprob_enh=0)
+    mcts2 = Mcts(0,0,0,5,256, nzprob_enh=2)
+    player1_winprob, player2_winprob, tie, _ = eval_mcts(5,5,4,mcts1,mcts2,sim_times=50, verbose=True)
+    print('\n split:',0,2,'\n',
+            ' w:    ', player1_winprob, player2_winprob, tie)
+
+
+
+def further_check_test():
+    mcts1 = Mcts(0,0,0,5,128, further_check=False)
+    mcts2 = Mcts(0,0,0,5,128, further_check=True)
+    player1_winprob, player2_winprob, tie, _ = eval_mcts(6,6,4,mcts1,mcts2,sim_times=20, verbose=True)
+    print('\n further_check:',mcts1.further_check,mcts2.further_check,'\n',
+            ' w:    ', player1_winprob, player2_winprob, tie)
+
+
+def defpolicy_test():
+    mcts1 = Mcts(0,0,0,5,128, usedef=False)
+    mcts2 = Mcts(0,0,0,5,128, usedef=True)
+    player1_winprob, player2_winprob, tie, _ = eval_mcts(6,6,4,mcts1,mcts2,sim_times=20, verbose=True)
+    print('\n usedef:',mcts1.usedef,mcts2.usedef,'\n',
+            ' w:    ', player1_winprob, player2_winprob, tie)
+'''
+ usedef: False True
+  w:     0.5 0.5 0.0
+'''
+
 
 if __name__=='__main__':
-    update_test()
+    further_check_test()
     # split_test()

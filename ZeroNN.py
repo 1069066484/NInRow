@@ -302,9 +302,10 @@ class ZeroNN:
             self.logger.log("Find the meta in file", self.path)
         else:
             self.logger.log("Init new meta")
-            self.saver = tf.train.Saver(max_to_keep=1000)
             sess = tf.Session()
+            self.saver = tf.train.Saver(max_to_keep=1000)
             sess.run(tf.global_variables_initializer())
+
         self.init_vars()
         self.sess = sess
         if not refresh_saving and self.path is not None: 
@@ -425,7 +426,7 @@ def main_sim_train():
     Y_value = np.random.randint(0,2,[num_samples,1], dtype=np.int8)
     Y_policy = np.random.rand(num_samples,rows*cols)
     clf = ZeroNN(verbose=2, path='ZeroNN_test', batch_size=512)
-    clf.fit(X, Y_policy, Y_value, 0.1)
+    # clf.fit(X, Y_policy, Y_value, 0.1)
     print(X[:2].shape)
     pred_value, pred_policy = clf.predict(X[:2])
     print(pred_value, pred_policy)
