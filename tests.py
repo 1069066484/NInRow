@@ -62,15 +62,16 @@ def p_test():
 
 
 def update_test():
-    max_update1 = 4
-    max_update2 = 1
+    max_update1 = 0xffff
+    max_update2 = 8
     mcts1 = Mcts(0,0,0,5,256, max_update=max_update1)
     mcts2 = Mcts(0,0,0,5,256, max_update=max_update2)
-    player1_winprob, player2_winprob, tieprob, _ = eval_mcts(5,5,4,mcts1,mcts2,sim_times=100, verbose=True)
+    player1_winprob, player2_winprob, tieprob, _ = eval_mcts(5,5,4,mcts1,mcts2,sim_times=40, verbose=True)
     print('\n max_update:',max_update1,max_update2,'\n',
             ' w:    ', player1_winprob, player2_winprob, tieprob)
 """
-
+ max_update: 65535 8
+  w:     0.625 0.3 0.07500000000000001
 """
 
 
@@ -80,13 +81,6 @@ def split_test():
     player1_winprob, player2_winprob, tie, _ = eval_mcts(5,5,4,mcts1,mcts2,sim_times=50, verbose=True)
     print('\n split:',0,2,'\n',
             ' w:    ', player1_winprob, player2_winprob, tie)
-"""
- split: 0 1
-  w:     0.45 0.49 0.06000000000000005
-
- split: 0 2
-  w:     0.43 0.47 0.10000000000000009
-"""
 
 
 def nzprob_enh_test():
@@ -104,20 +98,40 @@ def further_check_test():
     player1_winprob, player2_winprob, tie, _ = eval_mcts(6,6,4,mcts1,mcts2,sim_times=20, verbose=True)
     print('\n further_check:',mcts1.further_check,mcts2.further_check,'\n',
             ' w:    ', player1_winprob, player2_winprob, tie)
+"""
+ further_check: False True
+  w:     0.15 0.85 0.0
+"""
 
 
 def defpolicy_test():
-    mcts1 = Mcts(0,0,0,5,128, usedef=False)
-    mcts2 = Mcts(0,0,0,5,128, usedef=True)
-    player1_winprob, player2_winprob, tie, _ = eval_mcts(6,6,4,mcts1,mcts2,sim_times=20, verbose=True)
+    mcts1 = Mcts(0,0,0,5,128, usedef=[3,5])
+    mcts2 = Mcts(0,0,0,5,128, usedef=None)
+    player1_winprob, player2_winprob, tie, _ = eval_mcts(5,5,4,mcts1,mcts2,sim_times=50, verbose=True)
     print('\n usedef:',mcts1.usedef,mcts2.usedef,'\n',
             ' w:    ', player1_winprob, player2_winprob, tie)
 '''
- usedef: False True
-  w:     0.5 0.5 0.0
+
+ usedef: 3 None
+  w:     0.3 0.43 0.26999999999999996
+
+ usedef: 2 1
+  w:     0.47 0.34 0.19
+
+ usedef: 3 1
+  w:     0.4 0.35 0.25
+
+ usedef: 2 None
+  w:     0.37 0.41 0.22000000000000003
+
+ usedef: 1 None
+  w:     0.35 0.39 0.26
+
+ usedef: [2, 2] [None, 1]
+  w:     0.36 0.42 0.22000000000000003
 '''
 
 
 if __name__=='__main__':
-    further_check_test()
-    # split_test()
+    # further_check_test()
+    defpolicy_test()

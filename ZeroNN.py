@@ -198,7 +198,6 @@ class ZeroNN:
         loss_value = tf.losses.mean_squared_error(labels=y_value, predictions=logits_value, scope='loss_value')
         # pred_value is actually the same as logits_value, we are using an alias
         pred_value = tf.add_n([logits_value], name='pred_value')
-        # print(logits_value)
         corrects_value = tf.equal(tf.cast(tf.round(pred_value), tf.int8),y_value)
         acc_value = tf.reduce_mean(tf.cast(corrects_value, tf.float32),name='acc_value')
 

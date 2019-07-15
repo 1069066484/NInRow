@@ -26,7 +26,7 @@ class ZeroNNTrainer:
     The details are elaborated in the paper 'Mastering the game of Go without human knowledge'.
     """
     def __init__(self, folder, board_rows=int(rcn[0]), board_cols=int(rcn[1]), n_in_row=int(rcn[2]), 
-                 train_ratio=0.35, train_size=128*1024, mcts_sims=1024, self_play_cnt=10000, reinit=False, batch_size=512, verbose=True, n_eval_threads=2, best_player_path=-1, n_play_threads=3, plays=10, start_nozero=True):
+                 train_ratio=0.35, train_size=128*1024, mcts_sims=512, self_play_cnt=10000, reinit=False, batch_size=512, verbose=True, n_eval_threads=1, best_player_path=-1, n_play_threads=3, plays=10, start_nozero=True):
         self.board_rows = board_rows
         self.board_cols = board_cols
         self.self_play_cnt = self_play_cnt
@@ -56,7 +56,7 @@ class ZeroNNTrainer:
         self.path_loss_hists = join(self.folder_selfplay, npfn('selfplay' + '_loss'))
         self.logger = log.Logger(
             join(self.folder, logfn('ZeroNNTrainer-' + curr_time_str())), verbose)
-        self.nozero_mcts_sims = mcts_sims * 2
+        self.nozero_mcts_sims = int(mcts_sims * 2)
         # self.nozero_mcts is the initial MCTS
         # self.nozero_mcts use no ZeroNN for seaching and we use it to generate initial training data
         # instead of using zeroNNs with randomized parameters
@@ -150,7 +150,7 @@ class ZeroNNTrainer:
                         bserr()
                 elif cmd == 'bp':
                     best_player_path = input("Input num best player path, th current is " + str(self.best_player_path) + ":\n")
-                    if os.path.exists(self.best_player_path + '.index'):
+                    if os.path.exists(best_player_path + '.index'):
                         self.best_player_path = best_player_path
                         print("best player path -> ", self.best_player_path)
                     else:
@@ -158,8 +158,7 @@ class ZeroNNTrainer:
                 elif cmd == 'nm':
                     def nmerr():
                         print("nm error")
-                    nozero_mcts_sims = input("Input number of simulations of nozero_mcts's search. A non-positive number means deactivation\n" + 
-                                             " Currently, nozero_mcts is " + str(self.nozero_mcts) + ". And nozero_mcts_sims is " + str(self.nozero_mcts_sims) + ":\n")
+                    nozero_mcts_sims = input("Input number of simulations of nozero_mcts's search. A non-positive number means deactivation\n" + " Currently, nozero_mcts is " + str(self.nozero_mcts) + ". And nozero_mcts_sims is " + str(self.nozero_mcts_sims) + ":\n")
                     try:
                         nozero_mcts_sims = int(nozero_mcts_sims)
                         if nozero_mcts_sims > 0:
@@ -189,6 +188,19 @@ class ZeroNNTrainer:
                     game.players[0].mcts.zeroNN = zeroNN1
                     game.players[0].mcts.max_acts = self.mcts_sims
                     game.start(graphics=True)
+                elif cmd == 'di':
+                    def dierr():
+                        print("di error")
+                    discard = input("Input number of data to discard, the current number is " + str(len(self.train_data[0])) +":\n")
+                    try:
+                        discard = int(discard)
+                        if discard <= 0 or discard > len(self.train_data[0]) - 1:
+                            dierr()
+                        for i in range(3):
+                            self.train_data[i] = self.train_data[i][discard:]
+                        print("Discard successfully! The current number is ", len(self.train_data[0]))
+                    except:
+                        dierr()
                 else:
                     print("command error. (cmd=",cmd ,")")
             except:
@@ -228,9 +240,7 @@ class ZeroNNTrainer:
                        train_data[1][nonrep_rand_nums],
                        train_data[2][nonrep_rand_nums], 0.1)
             self.data_avail = False
-            zeroNN.epoch = 30
-            zeroNN.verbose = 30
-            zeroNN.save_epochs = 30
+            zeroNN.epoch = zeroNN.verbose = zeroNN.save_epochs = 40
             self.model_avail = True
             while not self.data_avail:
                 time.sleep(10)
@@ -279,7 +289,7 @@ class ZeroNNTrainer:
             self.logger.log('evaluator:',self.best_player_path, 'VS' , path_to_check,'--', winrate1,'-',winrate2,'-',tie_rate)
             time.sleep(5)
             # if the new player wins 3 out of 4 and draws in one game, replace the best player with it
-            if winrate2 > 0.7 and winrate1 < 0.01:
+            if winrate2 > 0.4 and winrate1 < 0.01:
                 self.curr_generation += 1
                 self.logger.log('evaluator:',path_to_check, 'defeat' , self.best_player_path, 'by', winrate2 - winrate1)
                 self.logger.log(path_to_check, 'becomes generation' , self.curr_generation)
@@ -334,6 +344,9 @@ class ZeroNNTrainer:
                                            np.vstack([self.train_data[1], ai_hists[1]]),
                                            np.vstack([self.train_data[2], ai_hists[2]])]\
                                                if self.train_data is not None else ai_hists
+                    # save the training data in case that we need to use them to continue training
+                    for i in range(3):
+                        np.save(self.data_path[i], self.train_data[i])
                     # Discard some old data since our memory is running out
                     if len(self.train_data[0]) > self.train_size + 1:
                         for i in range(3):
@@ -347,11 +360,11 @@ class ZeroNNTrainer:
                     # Discard some old data since a new best player is trained, we need to use data of games played by
                     # it to train new models
                     with self.lock_train_data:
-                        if len(self.train_data[0]) < round(len(self.train_data[0]) * 0.3+1):
+                        if len(self.train_data[0]) < round(len(self.train_data[0]) * 0.6+1):
                             break
                         len_train_data0 = len(self.train_data[0])
                         for i in range(3):
-                            self.train_data[i] = self.train_data[i][-round(len_train_data0 * 0.3+1):]
+                            self.train_data[i] = self.train_data[i][-round(len_train_data0 * 0.6+1):]
                     break
 
     def reversed_eval_board(self, board):
