@@ -27,7 +27,7 @@ class ZeroNN:
                  common_cnn=CNN_structures.zeronn8, 
                  policy_cnn=CNN.Params([[2,1]], []), 
                  value_cnn=CNN.Params([[1,1],1], [256]), 
-                 kp=0.5, lr_init=0.005, lr_dec_rate=0.99, batch_size=256, ckpt_idx=-1, save_epochs=2,
+                 kp=0.5, lr_init=0.001, lr_dec_rate=0.99, batch_size=256, ckpt_idx=-1, save_epochs=2,
                  epoch=10, verbose=None, act=tf.nn.relu, l2=5e-4, path=None, lock_model_path=None,
                  num_samples=None, 
                  logger=None):
@@ -136,10 +136,10 @@ class ZeroNN:
         The board can be reversed in terms of the opponent's view
         """
         # The codes below do convolution using fixed kernels
-        tl2br = np.diag([0.3,0.6,0.3])
+        tl2br = np.diag([0.3,0.45,0.3])
         filter_tl2br = tf.constant_initializer(tl2br.reshape([3,3,1,1]))
         filter_tr2bl = tf.constant_initializer(np.rot90(tl2br).reshape([3,3,1,1]))
-        l2r = np.array([0.0,.0,.0,.3,0.6,.3,.0,.0,.0]).reshape([3,3])
+        l2r = np.array([0.0,.0,.0,.3,0.45,.3,.0,.0,.0]).reshape([3,3])
         filter_l2r = tf.constant_initializer(l2r.reshape([3,3,1,1]))
         filter_t2b = tf.constant_initializer(np.rot90(l2r).reshape([3,3,1,1]))
         x = tf.concat([x] + 
@@ -406,11 +406,13 @@ class ZeroNN:
                 raise Exception("Error: trying to predict without trained network")
         # y_policy is not necessary for prediction
         # but we just needed for placeholder
-        pred_value, pred_policy = self.sess.run([self.ts['pred_value'], self.ts['pred_policy']], feed_dict={self.ts['x']: X, 
-                                        self.ts['kp']: 1.0,
-                                        self.ts['is_train']: False,
-                                        self.ts['y_policy']: 
-                                        np.zeros([X.shape[0], X.shape[1]*X.shape[2]])
+        pred_value, pred_policy = self.sess.run(
+            [self.ts['pred_value'], 
+             self.ts['pred_policy']], 
+            feed_dict={self.ts['x']: X, 
+                       self.ts['kp']: 1.0,
+                       self.ts['is_train']: False,
+                       self.ts['y_policy']: np.zeros([X.shape[0], X.shape[1]*X.shape[2]])
                                         })
         return [pred_value, pred_policy]
 

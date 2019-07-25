@@ -171,6 +171,17 @@ def shuffle_labeled_data(dl):
     return [data[a], labels[a]]
 
 
+def matMove(m, dir, fill=0):
+    if not isinstance(fill, np.ndarray):
+        fill = np.zeros(m.shape) + fill
+    ret = m.copy()
+    for r in range(m.shape[0]):
+        valid_r = (0 <= r-dir[0] < m.shape[0])
+        for c in range(m.shape[1]):
+            valid_c = (0 <= c-dir[1] < m.shape[1])
+            ret[r][c] = m[r-dir[0]][c-dir[1]] if valid_r and valid_c else fill[r][c]
+    return ret
+
 
 def _test_labels_one_hot():
     a = np.array([2,1,0,0,0,2,1,1,1])
@@ -206,8 +217,16 @@ def test_read_mnist_dl():
     print(dls[1].shape)
 
 
+def _test_matMove():
+    a = np.array(range(15)).reshape([3,5])
+    print(a)
+    print(matMove(a, [0,0], 100))
+    print(matMove(a, [0,1], 100))
+    print(matMove(a, [-2,0], 100))
+    print(matMove(a, [-2,1], 100))
+    print(matMove(a, [2,1], np.array(range(15)).reshape([3,5]) - 20 ))
+
+
 if __name__ == '__main__':
-    test_read_mnist_dl()
+    _test_matMove()
     pass
-    # print(__file__)
-    # print(exists('./datasets_raw'))

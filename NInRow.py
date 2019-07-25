@@ -11,6 +11,10 @@ from enum import IntEnum
 import os
 import sys
 from game_utils import *
+import MctsPuct
+
+
+MctsPuct.CHECK_DETAILS = True
 
 
 def main_exe():
@@ -38,18 +42,25 @@ def main_exe():
 """
 from ZeroNN import *
 def main_debug():
-    game = Game(6,6,4, Game.Player.AI, Game.Player.human, collect_ai_hists=False)
+    game = Game(8,8,5, Game.Player.AI, Game.Player.human, collect_ai_hists=False)
     zeroNN1 = ZeroNN(path=join(FOLDER_ZERO_NNS + '885', 'NNs'), 
-                        ckpt_idx=join(FOLDER_ZERO_NNS + '885', 'NNs/model.ckpt-1176'))
+                        ckpt_idx=-1)#join(FOLDER_ZERO_NNS + '885', 'NNs/model.ckpt-10300') )
     zeroNN2 = ZeroNN(path=join(FOLDER_ZERO_NNS + '885', 'NNs'), 
-                        ckpt_idx=join(FOLDER_ZERO_NNS + '885', 'NNs/model.ckpt-2878'))
-    zeroNN = None
-    game.players[0].mcts.zeroNN = None
-    game.players[0].mcts.max_acts = 512 
-    # game.players[0].mcts.further_check = False
+                        ckpt_idx=join(FOLDER_ZERO_NNS + '885', 'NNs/model.ckpt-29690'))
+    # zeroNN1 = None
+    game.players[0].mcts.zeroNN = zeroNN1
+    game.players[0].mcts.max_acts = 512
+    game.players[0].mcts.hand_val = 0.7
 
-    # game.players[1].mcts.zeroNN = None
-    # game.players[1].mcts.max_acts = 512 
+    # game.players[0].mcts.red_child = True
+    # 10.8 9.5
+    # game.players[0].mcts.further_check = False
+    
+    # game.players[1].mcts.zeroNN = zeroNN1
+    # game.players[1].mcts.max_acts = 512
+    # game.players[1].mcts.hand_val = 0.4
+    
+    # game.players[1].mcts.update_itv = 0
 
     game.start(graphics=True)
     print("over")

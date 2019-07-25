@@ -21,7 +21,7 @@ class Termination(IntEnum):
 
 
 DECIDE_VAL = 0.3
-
+DECIDE_MIN = 0.03
 
 move_funs = [
     lambda i,p:(p[0]+i,p[i]+i),
@@ -51,9 +51,9 @@ def check_over_full(board, pos, targets, ret_val=False):
             while is_pos_legal(pos_t) and bd[pos_t[0]][pos_t[1]] == role:
                 score += 1
                 pos_t = f(p,pos_t)
-            margins += (is_pos_legal(pos_t) and bd[pos_t[0]][pos_t[1]] == Grid.GRID_EMP)
+            margins += (is_pos_legal(pos_t) and bd[pos_t[0]][pos_t[1]] != -role)
             pos_t = f(p,pos_t)
-            margins += (is_pos_legal(pos_t) and bd[pos_t[0]][pos_t[1]] == Grid.GRID_EMP)
+            margins += (is_pos_legal(pos_t) and bd[pos_t[0]][pos_t[1]] != -role)
         margins = min(margins, 3)
         if score >= targets:
             return [Termination.won, 1] if ret_val else Termination.won
@@ -64,7 +64,7 @@ def check_over_full(board, pos, targets, ret_val=False):
             # score = 3, margins = 3 -> 0.6
             # score = 4, margins = 1 -> 0.1
             # score = 4, margins = 2 -> 0.8
-            val = max(val, (0.1 if score + margins == targets else 
+            val = max(val, (0.05 if score + margins == targets else 
                       (0.8 if score == 4 else 0.5)))
     for r in bd:
         for g in r:

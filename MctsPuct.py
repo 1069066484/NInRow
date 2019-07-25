@@ -15,13 +15,9 @@ import random
 import copy
 from Termination import *
 from data_utils import *
-# sing_evals = 0
-# multi_evals = 0
 
 
-class SearchOver(Exception):
-    def __init__(self):
-        pass
+CHECK_DETAILS = False
 
 
 class Node:
@@ -39,19 +35,25 @@ class Node:
         self.won = won_val_self[0]
         self.value = max(won_val_self[1], self.won_val(-role, sim_board)[1] * 0.85) \
             if mcts.further_check else 0
-        
+        if self.won == Termination.going:
+            self.value *= self.mcts.hand_val
         self.move_sim_board(sim_board)
         self.children = []
         self.avails = self.init_avails(sim_board) #empty grids
         self.p = p 
         self.lock = threading.Lock()
         self.move_sim_board(sim_board, True)
+        # self.last_qu = -10
 
     def check_best_child(self):
-        if self.mcts.further_check:
-            if max(self.children, key=lambda child: child.value).value < DECIDE_VAL:
+        if self.mcts.further_check and len(self.children) != 0:
+            mv = max(self.children, key=lambda child: child.value).value
+            if mv < DECIDE_VAL * self.mcts.hand_val:
                 return
-            self.children = [child for child in self.children if (child.value != 0)]
+            if mv >= 0.9999:
+                self.children = [child for child in self.children if (child.value >= 0.9999)]
+            else:
+                self.children = [child for child in self.children if (child.value >= DECIDE_MIN * self.mcts.hand_val)]
 
     def won_val(self, role, sim_board):
         if self.move is None:
@@ -99,23 +101,31 @@ class Node:
                 # print("expand")
                 self.expand(sim_board)
                 return self, True, sim_board
-        udeno = np.sqrt(self.visits)
-        if self.parent is None and self.mcts.noise != 0:
-            # add noise for children of the root
-            noises = np.random.dirichlet([0.03 for i in range(len(self.children))]) 
-            noises = list(noises)
-            best = max(self.children, key=lambda child: child.puct(udeno, noises))
-        else:
-            best = max(self.children, key=lambda child: child.puct(udeno))
+        best = self.children_qu(self.parent is None and self.mcts.noise != 0)
+        # print(best.qu - self.last_qu)
+        # self.last_qu = best.qu
         best.move_sim_board(sim_board)
         return best, False, sim_board
 
+    def children_qu(self, need_noise=False):
+        noise = np.random.dirichlet([0.03 for i in range(len(self.children))]) \
+            if need_noise else None
+        best = self.children[0]
+        udeno = np.sqrt(self.visits)
+        for i in range(len(self.children)):
+            if self.children[i].puct(udeno, noise[i] if need_noise else None) >= best.qu:
+                best = self.children[i]
+        return best
+
     def puct(self, udeno, noise=None):
-        noise = 0 if noise is None else noise.pop()
         # Q + U
-        return self.value / (self.visits+0.01) +\
-                self.mcts.c * (self.p * (1 - self.mcts.noise) + self.mcts.noise * noise) *\
-                    udeno / (self.visits+1)
+        if noise is None:
+            self.qu = self.value / (self.visits+0.01) +  self.mcts.c * self.p * udeno / (self.visits+1)
+        else:
+            self.qu = self.value / (self.visits+0.01) +\
+                    self.mcts.c * (self.p * (1 - self.mcts.noise) + self.mcts.noise * noise) *\
+                        udeno / (self.visits+1)
+        return self.qu
 
     def play(self):
         probs = None
@@ -140,7 +150,7 @@ class Node:
             4. the current player
         The board can be reversed in terms of the opponent's view
         """
-        eval_board = np.zeros(shape=[sim_board.shape[0],sim_board.shape[1], 4], dtype=np.int8)
+        eval_board = np.zeros(shape=[sim_board.shape[0],sim_board.shape[1], 4], dtype=np.bool)
 
         # stones of the previous player
         eval_board[:,:,0][sim_board==self.role] = 1
@@ -214,7 +224,7 @@ class Node:
                 self.value = 0.0 if self.mcts.usedef is None else \
                     np.mean([self.default_policy(sim_board) for _ in range(self.mcts.usedef[1])])
             else:
-                self.value *= (0.8 + (Grid.GRID_ENY == self.role) * 0.1)
+                self.value *= (0.8 + (Grid.GRID_ENY == self.role) * 0.5)
             probs = self.mcts.defprobs
         else:
             value = 0
@@ -233,18 +243,19 @@ class Node:
                     self.value, probs = self.mcts.eval_state_single(eval_board)
                 else:
                     self.value, probs = rets
+            self.value *= 0.15
             if value != 0:
-                self.value = value * 0.8 + self.value * 0.2
+                    self.value = value * self.mcts.hand_val + self.value * (1.0 - self.mcts.hand_val)
         self.children = [Node(self, (r,c), Grid(-self.role), sim_board, self.mcts, probs[r][c]) 
                          for r,c in self.avails]
         self.check_best_child()
 
 
 class MctsPuct:
-    def __init__(self, board_rows_, board_cols_, n_target_=4, max_t_=5,
-                 max_acts_=1000, c=2, inherit=True, zeroNN=None, n_threads=4,
+    def __init__(self, board_rows_, board_cols_, n_target_=4, max_t_=5, 
+                 max_acts_=1000, c=1, inherit=True, zeroNN=None, n_threads=4,
                  multi_wait_time_s=0.030, const_temp=0, noise=0.2, temp2zero_moves=0xfffff,
-                 resign_val=0.85, split=0, usedef=None, further_check=True):
+                 resign_val=0.85, split=0, usedef=None, further_check=True, hand_val=1):
         """
         @board_rows_: number of rows of the game board
         @board_cols_: number of cols of the game board, recommended to be the same as board_rows_ in benefit of data augmentation
@@ -283,10 +294,11 @@ class MctsPuct:
         self.temp_reciprocal = 1.0 / const_temp if const_temp != 0 else None
         if self.temp_reciprocal  is not None:
             self.temp_reciprocal = np.clip(self.temp_reciprocal,1e-3, 1e3)
+        self.hand_val = hand_val
 
         # virtual losses
         self.virtual_value_plus = 0.2
-        self.virtual_visits_plus = 0.5
+        self.virtual_visits_plus = 0.4
         self.noise = noise
         self.temp2zero_moves = temp2zero_moves
         self.moves = 0
@@ -344,6 +356,7 @@ class MctsPuct:
         self.resign_val = other.resign_val
         self.split = other.split
         self.split_chance = other.split_chance
+        self.hand_val = other.hand_val
 
     def copy_params(self, other):
         self.from_another_mcts(other)
@@ -442,7 +455,7 @@ class MctsPuct:
         if self.moves > self.temp2zero_moves:
             self.const_temp = 0
 
-        if False:
+        if CHECK_DETAILS:
             if self.zeroNN is not None:
                 value, policy = self.eval_state_single(self.root.create_eval_board(board.copy()))
             else:
