@@ -18,7 +18,7 @@ class ImgEnh(IntEnum):
     ALL         = 0b11111
 
 
-def _tf_random_rotate90(image, rotate_prob=0.9):
+def _tf_random_rotate90(image, rotate_prob=0.5):
     rotated = tf.image.rot90(image)
     rand = tf.random_uniform([], minval=0, maxval=1)
     return tf.cond(tf.greater(rand, rotate_prob), lambda: image, lambda: rotated)
