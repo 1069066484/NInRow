@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<ProfilingTarget xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <ProjectTarget>
+    <TargetProject>eb9a3c23-2d38-457d-a788-6d1836ffa17a</TargetProject>
+    <FriendlyName>NInRow</FriendlyName>
+  </ProjectTarget>
+  <Reports>
+    <Report>
+      <Filename>C:\Users\22\AppData\Local\Temp\NInRow_20190612.vsp</Filename>
+    </Report>
+  </Reports>
+</ProfilingTarget>
