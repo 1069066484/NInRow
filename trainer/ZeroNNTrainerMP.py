@@ -17,9 +17,9 @@ import random
 import multiprocessing as mp
 
 
-Manager = mp.Manager
 MctsPuct.CHECK_DETAILS = False
-rcn = '885'
+
+rcn = '115' + (('_' + sys.argv[1]) if len(sys.argv) > 1 else '')
 
 
 class ZeroNNTrainer:
@@ -33,25 +33,31 @@ class ZeroNNTrainer:
     The details are elaborated in the paper 'Mastering the game of Go without human knowledge'.
     """
     def __init__(self, folder, board_rows=int(rcn[0]), board_cols=int(rcn[1]), n_in_row=int(rcn[2]), 
-                 train_ratio=0.15, mcts_sims=512, self_play_cnt=1000, reinit=False, batch_size=256, verbose=True, n_eval_processes=1, best_player_path=-1, n_play_processes=1, plays=10, start_nozero=False, do_opt=True):
+                 train_ratio=0.5, mcts_sims=512, self_play_cnt=3000, reinit=True, batch_size=512, verbose=True, n_eval_processes=1, best_player_path=-1, n_play_processes=12, plays=10, start_nozero=False, do_opt=True, mp_parallel=True):
+        self.mp_parallel = mp_parallel
+        self.Lock = mp.Lock if mp_parallel else threading.Lock
+        self.Process = mp.Process if mp_parallel else threading.Thread
+
+
         # no sharing
         self.n_play_processes = n_play_processes
         self.n_eval_processes = n_eval_processes
         self.do_opt = do_opt
         self.folder = mkdir(folder)
-        self.manager = Manager()
+        self.manager = mp.Manager()
 
-        self.lock_train_data = mp.Lock()
-        self.lock_model_paths = mp.Lock()
-        self.lock_model_best = mp.Lock()
+        self.lock_train_data = self.Lock()
+        self.lock_model_paths = self.Lock()
+        self.lock_model_best = self.Lock()
 
-        self.unchecked_model_paths = self.manager.list([])
+        self.unchecked_model_paths = self.manager.list([])  if mp_parallel else list([])
         
         self.loss_hists = []
 
         # thread sharings
         self.batch_size = batch_size
-        self.logger = log.init_LoggerMP(join(self.folder, logfn('ZeroNNTrainer-' + curr_time_str())), verbose)
+        self.logger = log.init_LoggerMP(join(self.folder, logfn('ZeroNNTrainer-' + curr_time_str())), verbose) \
+            if mp_parallel else log.Logger(join(self.folder, logfn('ZeroNNTrainer-' + curr_time_str())), verbose)
         self.train_ratio = train_ratio
 
         # shared constants
@@ -88,19 +94,20 @@ class ZeroNNTrainer:
         else:
             self.loss_hists = []
 
-        self.loss_hists = self.manager.list(self.loss_hists)
+        self.loss_hists = self.manager.list(self.loss_hists) if mp_parallel else  list(self.loss_hists)
         self.shared_vars = {'self_play_cnt': self_play_cnt,
                             'plays': plays,
                             'best_player_path': best_player_path,
                             'model_avail': not reinit and not start_nozero,
-                            'data_avail': False,
-                            'resign_val': 0.99,
+                            'data_avail': 0,
+                            'resign_val': 100,
                             'hand_val': 0,
                             'curr_generation': curr_generation,
                             'nozero_mcts_sims': int(mcts_sims * 2),
                             'nozero_mcts': reinit or start_nozero
                             }
-        self.shared_vars = self.manager.dict(self.shared_vars)
+        self.shared_vars = self.manager.dict(self.shared_vars) if mp_parallel else dict(self.shared_vars)
+        self.event_opt = mp.Event()
 
     @staticmethod
     def manip_train_data( shared_constants, lock_train_data, data_to_append=None, num2keep=None):
@@ -139,21 +146,22 @@ class ZeroNNTrainer:
         """
         # The optimizer and console run in multiple threads
         print("Main thread-train")
+        self.event_opt.set()
         threads = ([threading.Thread(target=self.optimization)] if self.do_opt else []) \
             + [threading.Thread(target=self.console)]
         print('Optimization and console threads initialized')
         for t in threads:
             t.start()
         print('Optimization and console threads started')
-        Process = threading.Thread if self.do_opt else mp.Process
-        processes = [mp.Process(target=ZeroNNTrainer.evaluator, 
+        # Process = threading.Thread if self.do_opt else Process
+        processes = [self.Process(target=ZeroNNTrainer.evaluator, 
                                 args=(self.shared_constants, self.shared_vars, self.unchecked_model_paths, 
-                                      self.lock_model_paths, self.lock_model_best, self.logger)) 
+                                      self.lock_model_paths, self.lock_model_best, self.logger, self.event_opt)) 
                      for _ in range(self.n_eval_processes)] + \
-                    [mp.Process(target=ZeroNNTrainer.self_play,
+                    [self.Process(target=ZeroNNTrainer.self_play,
                                 args=(self.shared_constants, self.shared_vars, self.unchecked_model_paths, 
                                       self.lock_train_data, self.lock_model_best, self.loss_hists, 
-                                      self.path_loss_hists, self.logger))
+                                      self.path_loss_hists, self.logger, self.event_opt))
                      for _ in range(self.n_play_processes)]
         print('evaluator and self_play processes initialized')
         for p in processes:
@@ -181,7 +189,7 @@ class ZeroNNTrainer:
                         data_path = [join(folder, npfn('selfplay' + str(i))) for i in range(3)]
                         train_data = [np.load(p) for p in data_path]
                         train_data = ZeroNNTrainer.manip_train_data(self.shared_constants, self.lock_train_data, train_data)
-                        self.shared_vars['data_avail'] = True
+                        # self.shared_vars['data_avail'] = True
                         print("load new data succeessfully, data size = ", len(train_data[0]))
                     except:
                         print("md error: folder or files do not exist or are invalid")
@@ -235,8 +243,8 @@ class ZeroNNTrainer:
                     except:
                         nmerr()
                 elif cmd == 'op':
-                    print("Start an optimization now")
-                    self.shared_vars['data_avail'] = True
+                    print("Error: Op command is unavailable in MP mode")
+                    # self.shared_vars['data_avail'] = True
                 elif cmd == 'pc':
                     self_play_cnt = input("Input number of play count:\n")
                     try:
@@ -280,21 +288,24 @@ class ZeroNNTrainer:
                 print("Unknown console error!")
 
     def optimization(self):
+        # print('opt0')
         with self.lock_model_paths:
-            zeroNN = ZeroNN(verbose=2,path=self.folder_NNs, ckpt_idx=-1, num_samples=100000,
-                           epoch=3, batch_size=self.batch_size, save_epochs=4, logger=self.logger)
-            self.unchecked_model_paths += zeroNN.trained_model_paths
+            zeroNN = ZeroNN(verbose=30,path=self.folder_NNs, ckpt_idx=-1, num_samples=100000, trained_model_paths=self.unchecked_model_paths,
+                           epoch=30, batch_size=self.batch_size, save_epochs=30, logger=self.logger)
         self.logger.log('optimization start!')
+        time.sleep(240)
         while self.shared_vars['self_play_cnt'] > 0:
-            while not self.shared_vars['data_avail']:
-                time.sleep(120)
+            # print('opt1')
+            while self.shared_vars['data_avail'] != 0:
+                # print('opt2')
+                time.sleep(240)
+                if self.mp_parallel:
+                    self.event_opt.clear()
             train_data = ZeroNNTrainer.manip_train_data(self.shared_constants, self.lock_train_data)
-            if len(train_data[0]) * self.train_ratio * 1.5 < self.batch_size:
-                self.shared_vars['data_avail'] = False
             # Wait for the models to be evaluated
             # Better models need to be selected to generate better data
             # remove old models to ease burden of evaluator
-            while len(self.unchecked_model_paths) > 10 and np.random.rand() < 0.99:
+            while len(self.unchecked_model_paths) > 10:
                 time.sleep(20)
                 with self.lock_model_paths:
                     self.unchecked_model_paths.remove(
@@ -308,54 +319,54 @@ class ZeroNNTrainer:
             zeroNN.fit(train_data[0],
                        train_data[1],
                        train_data[2], 0.1)
-            self.shared_vars['data_avail'] = False
-            zeroNN.epoch = zeroNN.verbose = zeroNN.save_epochs = 10
+            self.event_opt.set()
             self.shared_vars['model_avail'] = True
+            time.sleep(120)
         print('optimization over')
 
     @staticmethod
-    def evaluator(consts, vars, unchecked_model_paths, lock_model_paths, lock_model_best, logger):
+    def evaluator(consts, vars, unchecked_model_paths, lock_model_paths, lock_model_best, logger, event_opt):
         while not vars['model_avail']:
-            time.sleep(5)
+            time.sleep(60)
         with lock_model_paths:
             while len(unchecked_model_paths) != 0:
                 unchecked_model_paths.pop()
         logger.log('evaluator start!')
         while vars['self_play_cnt'] > 0 or len(unchecked_model_paths) > 5:
+            while len(unchecked_model_paths) == 0:
+                time.sleep(20)
             # use 'with' to lock to avoid forgetting to release it 
             with lock_model_paths:
                 # wait for latest trained model
-                if len(unchecked_model_paths) < 2:
-                    time.sleep(240)
+                if len(unchecked_model_paths) == 0:
                     continue
                 path_to_check = unchecked_model_paths.pop()
-                if len(unchecked_model_paths) > 5:
-                    if np.random.rand() < 0.5:
-                        unchecked_model_paths.pop()
-                    else:
-                        path_to_check = unchecked_model_paths.pop()
+            event_opt.wait()
+            with lock_model_best:
+                vars['data_avail'] += 1
             logger.log('evaluator:',vars['best_player_path'], 'VS' , path_to_check, '...')
             if vars['nozero_mcts'] == False:
                 best_mcts = Mcts(
                     0,0,zeroNN=ZeroNN(verbose=False,path=consts['folder_NNs'], ckpt_idx=vars['best_player_path']),
-                    max_acts_=consts['mcts_sims'],const_temp=0,noise=0.1, resign_val=vars['resign_val'], hand_val=vars['hand_val'])
+                    max_acts_=consts['mcts_sims'],const_temp=0,noise=0, resign_val=vars['resign_val'], hand_val=vars['hand_val'])
             else:
                 # When self.nozero_mcts is not None, the first generation of zeroNN is not generated yet
                 # We double number of simulations since MCTS without zeroNN can make a faster searching,
                 # which also means any trained model is able to defeat MCTS without zeroNN using doule simulations
-                best_mcts = Mcts(0,0,zeroNN=None,max_acts_=consts['mcts_sims'],const_temp=0.2,noise=0.1, hand_val=vars['hand_val'])
+                best_mcts = Mcts(0,0,zeroNN=None,max_acts_=consts['mcts_sims'],const_temp=0.2,noise=0, hand_val=vars['hand_val'])
             zeroNN_to_check = ZeroNN(verbose=False,path=consts['folder_NNs'], ckpt_idx=path_to_check)
-            mcts2 = Mcts(0,0,zeroNN=zeroNN_to_check,max_acts_=consts['mcts_sims'],const_temp=0,noise=0.1, resign_val=vars['resign_val'], hand_val=vars['hand_val'])
+            mcts2 = Mcts(0,0,zeroNN=zeroNN_to_check,max_acts_=consts['mcts_sims'],const_temp=0,noise=0, resign_val=vars['resign_val'], hand_val=vars['hand_val'])
             
             # the evaluation must be fast to select the best model
             # play only several games, but require the player to check have a overwhelming advantage over the existing player
             # if the best player is defeated, then the player to check can take the first place
             winrate1, winrate2, tie_rate, _ = \
-                eval_mcts(consts['board_rows'], consts['board_cols'], consts['n_in_row'], best_mcts, mcts2, False, [3,1], False)
+                eval_mcts(consts['board_rows'], consts['board_cols'], consts['n_in_row'], best_mcts, mcts2, False, 5, False)
             logger.log('evaluator:',vars['best_player_path'], 'VS' , path_to_check,'--', winrate1,'-',winrate2,'-',tie_rate)
-            time.sleep(5)
+            with lock_model_best:
+                vars['data_avail'] -= 1
             # if the new player wins 3 out of 4 and draws in one game, replace the best player with it
-            if winrate2 > 0.4 and winrate1 < 0.01:
+            if winrate2 >= 0.7 and winrate1 <= 0.2:
                 vars['curr_generation'] += 1
                 logger.log('evaluator:',path_to_check, 'defeat' , vars['best_player_path'], 'by', winrate2 - winrate1)
                 logger.log(path_to_check, 'becomes generation' , vars['curr_generation'])
@@ -365,7 +376,7 @@ class ZeroNNTrainer:
         print("evaluator over")
 
     @staticmethod
-    def self_play(consts, vars, unchecked_model_paths, lock_train_data, lock_model_best, loss_hists, path_loss_hists, logger):
+    def self_play(consts, vars, unchecked_model_paths, lock_train_data, lock_model_best, loss_hists, path_loss_hists, logger, event_opt):
         while not vars['model_avail'] and vars['nozero_mcts'] == False:
             time.sleep(5)
         logger.log('self_play start!')
@@ -375,22 +386,25 @@ class ZeroNNTrainer:
             best_player_path = vars['best_player_path']
             # we do not lock for self_play_cnt
             while vars['self_play_cnt'] > 0:
+                event_opt.wait()
+                with lock_model_best:
+                    vars['data_avail'] += 1
                 vars['self_play_cnt'] -= vars['plays']
                 # decay resign_val
                 # rookies should always play the game to the end while masters are allowed to resign at an earlier stage
-                vars['resign_val'] = max(0.75, vars['resign_val'] - vars['resign_val'] * 0.00002 * vars['plays'])
+                vars['resign_val'] = max(0.75, vars['resign_val'] - vars['resign_val'] * 0.00001 * vars['plays'])
                 
                 # Create two identical players to 'self play'
                 if vars['nozero_mcts']:
-                    mcts1 = Mcts(0,0,zeroNN=None,max_acts_=vars['nozero_mcts_sims'],const_temp=1,noise=0.2, 
-                                 resign_val=0.99, temp2zero_moves=3, hand_val=vars['hand_val'])
-                    mcts2 = Mcts(0,0,zeroNN=None,max_acts_=vars['nozero_mcts_sims'],const_temp=1,noise=0.2, 
-                                 resign_val=0.99, temp2zero_moves=3, hand_val=vars['hand_val'])
+                    mcts1 = Mcts(0,0,zeroNN=None,max_acts_=vars['nozero_mcts_sims'],const_temp=1,noise=0, 
+                                  temp2zero_moves=3, hand_val=vars['hand_val'])
+                    mcts2 = Mcts(0,0,zeroNN=None,max_acts_=vars['nozero_mcts_sims'],const_temp=1,noise=0, 
+                                  temp2zero_moves=3, hand_val=vars['hand_val'])
                 else:
                     mcts1 = Mcts(0,0,zeroNN=zeroNN1,max_acts_=consts['mcts_sims'], const_temp=1, 
-                                 temp2zero_moves=3, noise=0.2, resign_val=vars['resign_val'], hand_val=vars['hand_val'])
+                                 temp2zero_moves=3, noise=0.05, resign_val=vars['resign_val'], hand_val=vars['hand_val'])
                     mcts2 = Mcts(0,0,zeroNN=zeroNN2,max_acts_=consts['mcts_sims'], const_temp=1, 
-                                 temp2zero_moves=3, noise=0.2, resign_val=vars['resign_val'], hand_val=vars['hand_val'])
+                                 temp2zero_moves=3, noise=0.05, resign_val=vars['resign_val'], hand_val=vars['hand_val'])
                 t = time.time()
                 logger.log('self_play:','self_play_cnt=',vars['self_play_cnt'],' self.resign_val=',vars['resign_val'])
                 winrate1, winrate2, tie_rate, ai_hists = \
@@ -412,8 +426,8 @@ class ZeroNNTrainer:
                 np.save(path_loss_hists, np.array(loss_hists))
                 logger.log('self_play:',winrate1, winrate2 , tie_rate,'  new data size=', 
                                 ai_hists[0].shape, '   total data:', train_data[0].shape)
-                vars['data_avail'] = True
                 with lock_model_best:
+                    vars['data_avail'] -= 1
                     find_new_best = (vars['best_player_path'] != best_player_path)
                 if find_new_best and len(train_data[0]) > 10000:
                     # Discard some old data since a new best player is trained, we need to use data of games played by
@@ -447,13 +461,13 @@ class ZeroNNTrainer:
         s = np.sum(x[:,:,:3])
         if s == 0:
             return
-        for step in [1,2,3,4]:
+        for step in [1,2]:
             for sx, sx2, dir in \
                             [[np.sum(x[:(2+step),:,:3]), np.sum(x[-2:,:,:3]), [-step,0]],
                             [np.sum(x[:,:(2+step),:3]),  np.sum(x[:,-2:,:3]), [0,-step]],
                             [np.sum(x[-(2+step):,:,:3]), np.sum(x[:2,:,:3]), [step,0]],
                             [np.sum(x[:,-(2+step):,:3]), np.sum(x[:,:2,:3]), [0,step]]]:
-                if sx < 1e-6 and (s <= 5 or  sx2 < 1e-6):
+                if sx < 1e-6 and (s <= 7 or  sx2 < 1e-6):
                     enh(dir)
 
     @staticmethod
@@ -473,16 +487,40 @@ class ZeroNNTrainer:
                 # the begining two steps should be treated as tie
                 Y_value.append([0 if (hist[2] is None or i < 2) else 
                                 (int(hist[2] != i % 2) * 2 - 1) * rate])
-                ZeroNNTrainer.try_enh(X, Y_policy, Y_value)
+                # ZeroNNTrainer.try_enh(X, Y_policy, Y_value)
                 rate = min(rate + 0.3 * (i % 2), 1.0)
         return [np.array(X, dtype=np.bool), 
                 np.array(Y_policy, dtype=np.float32).reshape(-1,consts['board_rows'] * consts['board_cols']), 
                 np.array(Y_value)]
 
+    @staticmethod
+    def merge_hist_files(folder):
+        """
+        The indicated folder should contain base files selfplay0.npy, selfplay1.npy, selfplay2.npy,
+            and to-merge files selfplay0 xx.npy, selfplay1 xx.npy and selfplay2 xx.npy.
+        Then to-merge files will be merged into base files
+        """
+        data = [np.load(npfn(join(folder, 'selfplay') + str(i))) for i in range(3)]
+        print('Original:', data[0].shape, data[1].shape, data[2].shape)
+        m = 0
+        for fn in os.listdir(folder):
+            if fn.startswith('selfplay0'):
+                m += 1
+                post_fix = fn[len('selfplay0'):]
+                data_new = [np.load(npfn(join(folder, 'selfplay') + str(i) + post_fix)) for i in range(3)]
+                for i in range(3):
+                    data[i] = np.vstack([data[i], data_new[i]])
+        print(m, 'items merged:', data[0].shape, data[1].shape, data[2].shape)
+        for i in range(3):
+            np.save(npfn(join(folder, 'selfplay') + str(i)), data[i])
 
 def main():
     trainer = ZeroNNTrainer(FOLDER_ZERO_NNS+rcn)
     trainer.train()
+
+
+def _test_merge_hist_files():
+    ZeroNNTrainer.merge_hist_files(r'F:\Software\vspro\NInRow\NInRow\zero_nns115\good')
 
 
 def eval_test():
@@ -492,36 +530,6 @@ def eval_test():
     mcts2 = Mcts(0,0,zeroNN=zeroNN2,max_acts_=100)
     winrate1, winrate2, tie_rate, ai_hists = \
         eval_mcts(5, 5, 4, mcts1, mcts2, True, 1, True)
-
-
-def try_enh(X, Y_policy, Y_value):
-    if len(X) == 0:
-        return
-    x = X[-1]
-    y_policy = Y_policy[-1]
-    y_value = Y_value[-1]
-    def enh(dir):
-        x_enh = x.copy()
-        for i in range(3):
-            # print("\nbefore\n",x[:,:,i])
-            x_enh[:,:,i] = matMove(x[:,:,i], dir)
-            # print(x_enh[:,:,i])
-        y_policy_enh = matMove(y_policy, dir)
-        y_policy_enh *= 1.0 / np.sum(y_policy_enh)
-        # print(np.sum(y_policy_enh))
-        X.append(x_enh)
-        Y_policy.append(y_policy_enh)
-        Y_value.append(y_value)
-    s = np.sum(x[:,:,0])
-    for step in [1,2,3]:
-        for sx, sx2, dir in \
-                        [[np.sum(x[:(2+step),:,:3]), np.sum(x[-2:,:,:3]), [-step,0]],
-                        [np.sum(x[:,:(2+step),:3]),  np.sum(x[:,-2:,:3]), [0,-step]],
-                        [np.sum(x[-(2+step):,:,:3]), np.sum(x[:2,:,:3]), [step,0]],
-                        [np.sum(x[:,-(2+step):,:3]), np.sum(x[:,:2,:3]), [0,step]]]:
-            if sx < 1e-6 and (s <= 2 or  sx2 < 1e-6):
-                enh(dir)
-
 
 def test_try_enh():
     X = np.zeros([4,6,4])
@@ -560,12 +568,12 @@ def test_try_enh():
         ]
     Y_value = [-0.5]
     t = time.time()
-    try_enh(X, Y_policy, Y_value)
+    ZeroNNTrainer.try_enh(X, Y_policy, Y_value)
     for i in range(100):
         X.pop()
         Y_policy.pop()
         Y_value.pop()
-        try_enh(X, Y_policy, Y_value)
+        ZeroNNTrainer.try_enh(X, Y_policy, Y_value)
     print('time=',time.time() - t)
     print(len(X), X[0].shape)
     for i in range(4):
@@ -578,7 +586,7 @@ def test_try_enh():
 if __name__=='__main__':
     # test_try_enh()
     main()
-
+    # _test_merge_hist_files()
 
 
 

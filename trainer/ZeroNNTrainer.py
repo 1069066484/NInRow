@@ -35,7 +35,7 @@ class ZeroNNTrainer:
     The details are elaborated in the paper 'Mastering the game of Go without human knowledge'.
     """
     def __init__(self, folder, board_rows=int(rcn[0]), board_cols=int(rcn[1]), n_in_row=int(rcn[2]), 
-                 train_ratio=0.15, train_size=128*1024, mcts_sims=512, self_play_cnt=10000, reinit=False, batch_size=512, verbose=True, n_eval_threads=1, best_player_path=-1, n_play_threads=1, plays=10, start_nozero=False, do_opt=True):
+                 train_ratio=0.15, train_size=128*1024, mcts_sims=256, self_play_cnt=1000, reinit=False, batch_size=512, verbose=True, n_eval_threads=1, best_player_path=-1, n_play_threads=1, plays=10, start_nozero=False, do_opt=True):
         self.board_rows = board_rows if board_rows > n_in_row else board_rows + 10
         self.board_cols = board_cols if board_cols > n_in_row else board_cols + 10
         self.self_play_cnt = self_play_cnt
@@ -312,7 +312,7 @@ class ZeroNNTrainer:
             winrate1, winrate2, tie_rate, _ = \
                 eval_mcts(self.board_rows, self.board_cols, self.n_in_row, best_mcts, mcts2, False, [3,1], False)
             self.logger.log('evaluator:',self.best_player_path, 'VS' , path_to_check,'--', winrate1,'-',winrate2,'-',tie_rate)
-            time.sleep(5)
+
             # if the new player wins 3 out of 4 and draws in one game, replace the best player with it
             if winrate2 > 0.4 and winrate1 < 0.01:
                 self.curr_generation += 1

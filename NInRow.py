@@ -14,7 +14,7 @@ from games.game import *
 from mcts import MctsPuct
 
 
-MctsPuct.CHECK_DETAILS = True
+MctsPuct.CHECK_DETAILS = False
 
 
 def main_exe():
@@ -33,37 +33,36 @@ def main_exe():
     game.start()
     input("Press any key to exit")
 
-"""
-[[153. 173. 213. 195. 125.]
- [309. 210. 386. 282. 254.]
- [225. 217. 670. 360. 333.]
- [170. 165. 184. 301. 169.]
- [195. 201. 140. 265.  75.]]
-"""
+
 from nets.ZeroNN import *
 def main_debug():
-    game = Game(8,8,5, Game.Player.AI, Game.Player.human, collect_ai_hists=False)
-    zeroNN1 = ZeroNN(path=join(FOLDER_ZERO_NNS + '885', 'NNs'), 
-                        ckpt_idx=-1)#join(FOLDER_ZERO_NNS + '885', 'NNs/model.ckpt-10300') )
-    zeroNN2 = ZeroNN(path='new_train_zeronn/zeronn8', 
-                        ckpt_idx=-1)
-    zeroNN1 = None
-    game.players[0].mcts.zeroNN = zeroNN1
-    game.players[0].mcts.max_acts = 64
-
-
-    # game.players[0].mcts.red_child = True
-    # 10.8 9.5
-    # game.players[0].mcts.further_check = False
+    if True:
+        game = Game(11,11,5, Game.Player.AI, Game.Player.AI, collect_ai_hists=True)
+        zeroNN1 = ZeroNN(path=join(FOLDER_ZERO_NNS + '115', 'NNs'), 
+                             ckpt_idx=-1)#join(FOLDER_ZERO_NNS + '885', 'NNs/model.ckpt-10300') )
+        zeroNN1 = None
     
-    # game.players[1].mcts.zeroNN = zeroNN1
-    # game.players[1].mcts.max_acts = 1024
+        game.players[0].mcts.zeroNN = zeroNN1
+        game.players[0].mcts.max_acts = 512
+        # game.players[0].mcts.hand_val = 0.5
+        # game.players[0].c = 15
 
 
-    game.start(graphics=True)
-    print("over")
-    return None
+        # game.players[0].mcts.red_child = True
+        # 10.8 9.5
+        # game.players[0].mcts.further_check = False
+    
+        game.players[1].mcts.zeroNN = zeroNN1
+        game.players[1].mcts.max_acts = 512
+        game.players[1].mcts.hand_val = 0
+
+        game.start(graphics=True)
+    input("over")
+    # return None
     probs, eval_board, winner = game.ai_hists()
+    print(len(probs), len(eval_board), winner)
+    print(probs[0].shape, eval_board[0].shape, winner)
+    input()
     for i in range(3):
         print(probs[i])
         print(eval_board[i][:,:,0])
@@ -78,19 +77,18 @@ def main_debug():
 
 def eval_debug():
     # zeroNN1 = ZeroNN(verbose=False,path=join(FOLDER_ZERO_NNS, 'NNs'))
-    zeroNN1 = ZeroNN(path=join(FOLDER_ZERO_NNS + '885', 'NNs'), 
-                        ckpt_idx=join(FOLDER_ZERO_NNS + '885', 'NNs/model.ckpt-1176'))
+    zeroNN1 = ZeroNN(path=join(FOLDER_ZERO_NNS + '115', 'NNs'))
     # zeroNN2 = ZeroNN(verbose=False,path=join(FOLDER_ZERO_NNS, 'NNs'))
-    zeroNN2 = ZeroNN(path=join(FOLDER_ZERO_NNS + '885', 'NNs'), 
-                        ckpt_idx=join(FOLDER_ZERO_NNS + '885', 'NNs/model.ckpt-1857'))
-    mcts1 = Mcts(0,0,zeroNN=zeroNN1,max_acts_=64)
-    mcts2 = Mcts(0,0,zeroNN=zeroNN2,max_acts_=64)
+    zeroNN2 = None
+    mcts1 = Mcts(0,0,zeroNN=zeroNN1,max_acts_=256)
+    mcts2 = Mcts(0,0,zeroNN=zeroNN2,max_acts_=256)
     winrate1, winrate2, tie_rate, ai_hists = \
-        eval_mcts(8, 8, 5, mcts1, mcts2, True, 2, True)
+        eval_mcts(11, 11, 5, mcts1, mcts2, sim_times=10, verbose=True)
     print(winrate1, winrate2, tie_rate)
     '''
     
     '''
+
 
 if __name__=='__main__':
     main_debug()

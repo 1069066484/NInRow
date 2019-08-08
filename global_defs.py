@@ -6,16 +6,7 @@
 
 import os
 from enum import IntEnum
-
-
-join = os.path.join
-exists = os.path.exists
-
-
-def mkdir(dir):
-    if not exists(dir):
-        os.mkdir(dir)
-    return dir
+from utils.data import asdir, b2s, join, exists, mkdir
 
 
 FOLDER_LOGS = mkdir('logs')

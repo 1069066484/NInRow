@@ -16,9 +16,9 @@ import copy
 
 
 class AI:
-    def __init__(self, board, n_in_row, max_acts):
+    def __init__(self, board, n_in_row):
         self.board = board.board
-        self.mcts = Mcts(self.board.shape[0], self.board.shape[1], n_in_row, 5, max_acts)
+        self.mcts = Mcts(self.board.shape[0], self.board.shape[1], n_in_row)
 
     def set_id(self, grid_id):
         self.grid_id = grid_id
@@ -58,7 +58,7 @@ class Board:
 
 
 class Human:
-    def __init__(self, board, n_in_row, max_acts):
+    def __init__(self, board, n_in_row):
         self.board = board
 
     def set_id(self, grid_id):
@@ -81,15 +81,16 @@ class Game:
         AI = 0
         human = 1
 
-    def __init__(self, rows, cols, n_in_row, p1=Player.human, p2=Player.AI, collect_ai_hists=False):
+    def __init__(self, rows, cols, n_in_row, p1=Player.human, p2=Player.AI, collect_ai_hists=False, use_hists=None, hist_it=0):
         """
         You can use either type Player for initialization or an initialized object
         @collect_ai_hists:  whether or not to collect ai's histories, only available if both players are AI.
+        @use_hists: it should be a path that contains n-r-c-4 array or an array like this.
         """
         self.board = Board(rows, cols)
         init_player = [AI, Human]
         self.ps = [p1, p2]
-        self.players = [init_player[p](self.board, n_in_row, 1000)
+        self.players = [init_player[p](self.board, n_in_row)
                         for p in [p1, p2]]
         self.players[0].set_id(Board.GridState.p1)
         self.players[1].set_id(Board.GridState.p2)
@@ -97,16 +98,33 @@ class Game:
         assert(self.n_in_row <= rows and self.n_in_row <= cols )
         self.collect_ai_hists = collect_ai_hists
         self.all_ai = (p1 + p2 == 0)
+        self.use_hists = np.load(use_hists) if isinstance(use_hists, str) else use_hists
+        self.hist_it = hist_it
+        self.init_replay()
         if collect_ai_hists:
             assert(self.all_ai)
             self.hists_prob = []
             self.hists_board = []
 
+    def init_replay(self):
+        if self.use_hists is None:
+            return
+        while True:
+            if np.sum(self.use_hists[self.hist_it,:,:,:3]) == 0:
+                # input("Going to replay at " + str(self.hist_it), '  sum=', np.sum(self.use_hists[self.hist_it,:,:,:3]))
+                self.hist_it += 1
+                return
+            self.hist_it += 1
+        raise Exception("Error invalid history, cannot replay")
+
     def graphics(self, to_print=''):
         """
         Show user interface.
         """
-        os.system('cls')
+        if sys.platform == 'win32':
+            os.system('cls')
+        else:
+            os.system('clear')
         print(to_print)
         print('\n')
         prints = ['_', '1', '2']
@@ -144,7 +162,22 @@ class Game:
                 print('Player',turn + 1,'s turn:')
             if self.ps[turn] == Game.Player.AI:
                 self.players[turn].mcts.enemy_move = act
-            act = self.players[turn].get_valid_action()
+
+            if self.use_hists is None:
+                act = self.players[turn].get_valid_action()
+            else:
+                try:
+                    last_move = np.where(self.use_hists[self.hist_it,:,:,2]==1)
+                    act0 = last_move[0][0]
+                    act1 = last_move[1][0]
+                    # argmax_this_move = 
+                except:
+                    # print
+                    input("Replay over player " + str(turn + 1) + " wins , position: " + str(self.hist_it))
+                    return self.hist_it
+                act = (act0, act1)
+                while np.sum(self.use_hists[self.hist_it,:,:,:2]) == stones + 1:
+                    self.hist_it += 1
             if act is None:
                 if graphics:
                     print('Player',turn + 1,'resigns')
@@ -155,10 +188,10 @@ class Game:
             if graphics: 
                 self.graphics('Last move of player' + str(turn+1) + ':' + str(act))
             termination = self.check_over(act, stones)
-            if graphics and self.all_ai:
+            if graphics and self.use_hists is not None:
                 input()
             self.collect_hists(turn)
-            # Check whether the game is over
+            # Check whether the game is over 
             if termination != Termination.going:
                 if termination == Termination.won:
                     if graphics: 
@@ -215,4 +248,13 @@ def eval_mcts(rows, cols, n_in_row, mcts1, mcts2, verbose=True, sim_times=100, c
     return [player1_wincnt, player2_wincnt, tie_rate, ai_hists]
 
 
+def _test_replay():
+    path = r'F:\Software\vspro\NInRow\NInRow\zero_nns115\good\selfplay0.npy'
+    game = Game(11,11,5,use_hists=path, hist_it=40000)
+    ret = game.start()
+    game = Game(11,11,5,use_hists=path, hist_it=ret)
+    ret = game.start()
 
+
+if __name__=='__main__':
+    _test_replay()

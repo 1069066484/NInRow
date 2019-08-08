@@ -40,7 +40,7 @@ class Logger(object):
         if self.file is not None:
             self.file.write(message)
             self.write_cnt += 1
-            if self.write_cnt % self.flush_freq == 0:
+            if self.write_cnt % self.flush_freq == 0 or len(message) > self.flush_freq:
                 self.file.flush() 
  
     def flush(self):
@@ -65,7 +65,7 @@ class LoggerMP(BaseManager):
         if self.file is not None:
             self.file.write(message)
             self.write_cnt += 1
-            if self.write_cnt % self.flush_freq == 0:
+            if self.write_cnt % self.flush_freq == 0 or len(message) > 10:
                 self.file.flush() 
  
     def flush(self):

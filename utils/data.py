@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 @Author: Zhixin Ling
-@Description: Part of the project of NinRowAI: some help functions.
+@Description: Some help functions.
 """
 
-from global_defs import *
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -17,6 +16,11 @@ from scipy.io import loadmat
 import pickle
 import datetime
 import imageio
+from queue import Queue
+
+
+exists = os.path.exists
+join = os.path.join
 
 
 def posfix_filename(filename, postfix):
@@ -64,6 +68,28 @@ giffn = giffilename
 
 def curr_time_str():
     return datetime.datetime.now().strftime('%y%m%d%H%M%S')
+
+
+def backslash2slash(s):
+    orig_s = repr(s)
+    repl_s = orig_s.replace('\\', '/').replace('//','/')
+    return eval(repl_s)
+
+b2s = backslash2slash
+
+
+def mkdir(dir):
+    if not exists(dir):
+        os.mkdir(dir)
+    return dir
+
+
+def asdir(dir):
+    assert exists(dir)
+    return dir
+
+
+from global_defs import *
 
 
 def read_mnist(one_hot=True):
@@ -219,6 +245,23 @@ def del_num_file_by_key(folder, key):
     return dp
 
 
+def traverse(folder, postfix='', rec=False, only_file=True):
+    q = Queue()
+    q.put(asdir(folder))
+    while not q.empty():
+        folder = q.get()
+        for path in os.listdir(folder):
+            path = join(folder, path)
+            if os.path.isdir(path):
+                q.put(path)
+                if only_file:
+                    continue
+            if path.endswith(postfix):
+                yield path
+        if not rec:
+            break
+
+
 def _test_labels_one_hot():
     a = np.array([2,1,0,0,0,2,1,1,1])
     print(labels2one_hot(a))
@@ -271,5 +314,10 @@ def _test_del_num_file():
         print(del_num_file_by_key(folder, key), 'deleted')
 
 
+def _test_backslash2slash():
+    s = r'C:\Users\22\Downloads'
+    print(s, backslash2slash(s))
+
+
 if __name__ == '__main__':
-    _test_del_num_file()
+    _test_backslash2slash()

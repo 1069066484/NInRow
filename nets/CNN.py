@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 @Author: Zhixin Ling
 @Description: A general and flexible CNN model. fully connected layers, common convolution layers and residual and inception blocks are supported.
@@ -140,6 +141,7 @@ class CNN:
                     conv_cnt += 1
             if self.fcs is None:
                 return net
+            # fully connected layers
             net = slim.flatten(net)
             for idx, param in enumerate(self.fcs):
                 net = slim.fully_connected(net, param, scope=scope_prefix+'fc' + str(idx))

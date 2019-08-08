@@ -3,6 +3,9 @@
 @Author: Zhixin Ling
 @Description: Part of the NinRowAI: network model. refer to AlphaGo Zero's network. One way in and two ways out.
 """
+import os
+# os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
@@ -19,9 +22,9 @@ from tensorflow.contrib.slim import nets
 from nets import CNN_structures
 import matplotlib.pyplot as plt 
 from functools import reduce
+import sys
 
-
-os.environ["TF_CPP_MIN_LOG_LEVEL"]='3'
+# os.environ["TF_CPP_MIN_LOG_LEVEL"]='3'
 
 
 class ZeroNN:
@@ -29,10 +32,9 @@ class ZeroNN:
                  common_cnn=CNN_structures.zeronn8, 
                  policy_cnn=CNN.Params([[2,1]], []), 
                  value_cnn=CNN.Params([[1,1],1], [256]), 
-                 kp=0.5, lr_init=0.001, lr_dec_rate=0.999, batch_size=256, ckpt_idx=-1, save_epochs=2,
+                 kp=0.5, lr_init=0.001, lr_dec_rate=0.9999, batch_size=256, ckpt_idx=-1, save_epochs=2,
                  epoch=10, verbose=None, act=tf.nn.relu, l2=1e-5, path=None, lock_model_path=None,
-                 num_samples=None, 
-                 logger=None):
+                 num_samples=None, logger=None, init_path=None, use_prek=True, save_best=False, trained_model_paths=[]):
         """
         verbose:    set verbose an integer to output the training history or None not to output
         logger:     if a logger is provided, the outputs will use the given logger
@@ -62,12 +64,15 @@ class ZeroNN:
         self.ckpt_idx = ckpt_idx
 
         # collections of variables
-        self.var_names = ['x','kp', 'y_value','y_policy', 'is_train', 
+        self.var_names = ['x','kp', 'y_value','y_policy', 'is_train', 'acc_policy',
         'loss_policy', 'loss_value', 'pred_value','acc_value', 'lr', 'merged_sum',
         'pred_policy', 'loss_l2', 'loss_total', 'global_step','train_step']
-        self.trained_model_paths = []
+        self.trained_model_paths = trained_model_paths
         self.train_hists = None
         self.test_hists = None
+        self.init_path = init_path
+        self.use_prek = use_prek
+        self.save_best = save_best
 
     def print_vars(self, graph=None, vars=True, ops=True):
         """
@@ -87,12 +92,39 @@ class ZeroNN:
         Get collections in the graph and save the necessary variables into the dictionary
         """
         for ts in self.var_names:
+            try:
                 self.ts[ts] = tf.get_collection(ts)[0]
+            except:
+                print(ts, 'collection failed')
 
     def __str__(self):
         return "ZeroNN"
         return "ZeroNN-- common_cnn: {} \tfcs: {} \tkp: {} \tlr_init: {} \tlr_dec_rate: {} \tbatch_size: {} \tepoch: {} \tact: {}".format(
             self.common_cnn, self.fcs, self.kp, self.lr_init, self.lr_dec_rate, self.batch_size, self.epoch, str(self.act).split(' ')[1] if self.act is not None else 'NONE')
+
+    def copy_possible_params(self):
+        # NinRow
+        
+        if self.init_path is None:
+            return
+        print('copy possible params from', self.init_path, '...')
+        vars = tf.global_variables()
+        reader = tf.train.NewCheckpointReader(self.init_path)
+        var_to_shape_map = reader.get_variable_to_shape_map() 
+        init_cnt = 0
+        for var in vars:
+            name = var.name.split(':')[0]
+            if name in var_to_shape_map and name.count('Adam') == 0:
+                var_ref = reader.get_tensor(name)
+                # print(var, var_ref)
+                if var_ref.shape == var.shape:
+                    # print(var.name)
+                    self.sess.run(tf.assign(var, var_ref))
+                    init_cnt += 1
+        print(init_cnt, 'params copied')
+        if self.path is not None:
+            self.saver.save(self.sess, self.path + '/0', write_meta_graph=True)
+            print('params written')
 
     def init_training_data(self, X, Y_policy, Y_value, reserve_test):
         """
@@ -141,39 +173,41 @@ class ZeroNN:
         The board can be reversed in terms of the opponent's view
         """
         # The codes below do convolution using fixed kernels
-        weights = [0.1,0.2,0.3,0.2,0.1]
-        len_w = len(weights)
-        tl2br = np.diag(weights)
-        filter_tl2br = tf.constant_initializer(tl2br.reshape([len_w,len_w,1,1]))
-        filter_tr2bl = tf.constant_initializer(np.rot90(tl2br).reshape([len_w,len_w,1,1]))
-        l2r = np.array([0 for _ in range(len_w)] * (len_w//2) + weights + [0 for _ in range(len_w)] * (len_w//2)).reshape([len_w,len_w])
-        filter_l2r = tf.constant_initializer(l2r.reshape([len_w,len_w,1,1]))
-        filter_t2b = tf.constant_initializer(np.rot90(l2r).reshape([len_w,len_w,1,1]))
+        # weights = [0.1,0.2,0.3,0.2,0.1]
+        if self.use_prek:
+            weights = [0.1,0.2,0.4,0.2,0.1]
+            len_w = len(weights)
+            tl2br = np.diag(weights)
+            filter_tl2br = tf.constant_initializer(tl2br.reshape([len_w,len_w,1,1]))
+            filter_tr2bl = tf.constant_initializer(np.rot90(tl2br).reshape([len_w,len_w,1,1]))
+            l2r = np.array([0 for _ in range(len_w)] * (len_w//2) + weights + [0 for _ in range(len_w)] * (len_w//2)).reshape([len_w,len_w])
+            filter_l2r = tf.constant_initializer(l2r.reshape([len_w,len_w,1,1]))
+            filter_t2b = tf.constant_initializer(np.rot90(l2r).reshape([len_w,len_w,1,1]))
+        
+            x = tf.concat([x] + 
+                          [slim.conv2d(x[:,:,:,(ch-1):ch], 1, len_w, 
+                                       weights_initializer=init,trainable=False)
+                           for ch in [1,2] for init in 
+                           [filter_tl2br, filter_tr2bl, filter_l2r, filter_t2b]], 
+                          axis=3)
 
-        x = tf.concat([x] + 
-                      [slim.conv2d(x[:,:,:,(ch-1):ch], 1, len_w, 
-                                   weights_initializer=init,trainable=False)
-                       for ch in [1,2] for init in 
-                       [filter_tl2br, filter_tr2bl, filter_l2r, filter_t2b]], 
-                      axis=3)
         lastdim = int(x.shape[-1])
+
         # the codes below performs data augmentation
-        def augment():
-            y_policy_trans = tf.reshape(y_policy, [-1, rows, cols, 1])
-            # x and y_policy should be stacked, it is not right to rotate x only!
-            x_y_policy = tf.concat([x, y_policy_trans], axis=3)
-            x_y_policy = self.tf_random_rotate90(x_y_policy)
-            def flip(img):
-                return tf.image.random_flip_left_right(tf.image.random_flip_up_down(img))
-            x_y_policy = tf.map_fn(flip, x_y_policy)
-            x_trans = x_y_policy[:,:,:,:lastdim]
-            y_policy_trans = x_y_policy[:,:,:,lastdim]
-            y_policy_trans = slim.flatten(y_policy_trans)
-            return [x_trans, y_policy_trans]
-        def no_augment():
-            return [x, y_policy]
-        x_trans, y_policy_trans = tf.cond(is_train, augment, no_augment)
-        return x_trans, y_policy_trans
+        y_policy_trans = tf.reshape(y_policy, [-1, rows, cols, 1])
+        # x and y_policy should be stacked, it is not right to rotate x only!
+        x_y_policy = tf.concat([x, y_policy_trans], axis=3)
+        x_y_policy = self.tf_random_rotate90(x_y_policy)
+        def flip(img):
+            return tf.image.random_flip_left_right(tf.image.random_flip_up_down(img))
+        x_y_policy = tf.map_fn(flip, x_y_policy)
+        x_trans = x_y_policy[:,:,:,:lastdim]
+        y_policy_trans = x_y_policy[:,:,:,lastdim]
+        y_policy_trans = tf.reshape(y_policy_trans, [-1, rows * cols])
+
+        # lambda: image, lambda: rotated
+        x_ret, y_policy_ret = tf.cond(is_train, lambda: [x_trans, y_policy_trans], lambda: [x, y_policy])
+        return x_ret, y_policy_ret
 
     def construct_model(self):
         """
@@ -214,6 +248,8 @@ class ZeroNN:
         cross_entropy_policy = -tf.reduce_sum(y_policy_trans*tf.log(tf.clip_by_value(logits_policy,1e-10,1.0)),1)
         loss_policy = tf.reduce_mean(cross_entropy_policy, name='loss_policy')
         pred_policy = tf.add_n([logits_policy], name='pred_policy')
+        corrects_policy = tf.equal(tf.cast(tf.argmax(pred_policy), tf.int8),tf.cast(tf.argmax(y_policy), tf.int8))
+        acc_policy = tf.reduce_mean(tf.cast(corrects_policy, tf.float32),name='acc_policy')
         # pred_policy = tf.nn.softmax(logits_policy, name='pred_policy')
 
         # regularization_loss = tf.add_n(tf.losses.get_regularization_losses, name='loss_l2') 
@@ -228,7 +264,7 @@ class ZeroNN:
             (n_xs if self.num_samples is None else self.num_samples) / self.batch_size, 
             self.lr_dec_rate,
             staircase=True)
-        lr = tf.reduce_max([lr, 5e-6], name='lr')
+        lr = tf.reduce_max([lr, 1e-5], name='lr')
         optimizer = tf.train.AdamOptimizer(learning_rate=lr)
         train_step = slim.learning.create_train_op(
             loss_total,  optimizer, global_step=global_step)
@@ -271,11 +307,7 @@ class ZeroNN:
         if self.sess is None:
             if not self.init_sess(refresh_saving=False):
                 raise Exception("Error: trying to evaluate without trained network")
-        loss_policy_sum = 0.0
-        loss_value_sum = 0.0
-        loss_total_sum = 0.0
-        acc_value_sum = 0.0
-        correct_preds_value = 0.0
+        sums = [0.0 for _ in range(5)]
         feed_dict = {self.ts['kp']: 1.0, self.ts['is_train']: False}
         for batch_idx in range(0,X.shape[0],self.batch_size):
             # acuiqre the test batches
@@ -287,39 +319,33 @@ class ZeroNN:
                               self.ts['y_value']: batch_ys_value, 
                               self.ts['y_policy']: batch_ys_policy})
             # run the evaluation for the indicated batch
-            [loss_policy, 
-             loss_value, 
-             loss_total, 
-             acc_value] = self.sess.run(
+            vals = self.sess.run(
                 [self.ts['loss_policy'], 
                  self.ts['loss_value'], 
                  self.ts['loss_total'], 
-                 self.ts['acc_value']],
+                 self.ts['acc_value'],
+                 self.ts['acc_policy']],
                  feed_dict=feed_dict)
             mult = batch_idx_next - batch_idx
+            for i in range(len(sums)):
+                sums[i] += vals[i] * mult
             # summarize the evaluation
-            loss_policy_sum += loss_policy * mult
-            loss_value_sum += loss_value * mult
-            loss_total_sum += loss_total * mult
-            acc_value_sum += acc_value * mult
-        return [loss_policy_sum / X.shape[0], 
-                loss_value_sum / X.shape[0], 
-                loss_total_sum / X.shape[0], 
-                acc_value_sum / X.shape[0]]
+        return [round(s / X.shape[0], 10) for s in sums]
 
     def init_sess(self, refresh_saving):
         """
         return whether use new parameters
         """
         path_meta = join(self.path, '0.meta')
+        gpu_options = tf.GPUOptions(allow_growth=True)
         if self.path is not None and exists(path_meta):
             tf.reset_default_graph()
-            sess = tf.Session()
+            sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
             self.saver = tf.train.import_meta_graph(path_meta)
             self.logger.log("Find the meta in file", self.path)
         else:
             self.logger.log("Init new meta")
-            sess = tf.Session()
+            sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
             self.saver = tf.train.Saver(max_to_keep=1000)
             sess.run(tf.global_variables_initializer())
 
@@ -340,8 +366,13 @@ class ZeroNN:
                     self.logger.log("Find the check point ",self.ckpt_idx," in file", self.path)
                     return True
             except: 
-                self.logger.log("Init new parameters")
-                return False
+                pass
+            self.logger.log("Init new parameters")
+            self.copy_possible_params()
+            return False
+        print('return', not refresh_saving, self.path is not None, 
+              not refresh_saving and self.path is not None)
+        return False
 
     def train(self):
         sess = self.sess
@@ -371,24 +402,27 @@ class ZeroNN:
                 train_eval = self.run_eval(self.X, self.Y_policy, self.Y_value)
                 test_eval = [-1.0 for i in range(4)] if self.X_te is None \
                       else self.run_eval(self.X_te, self.Y_policy_te, self.Y_value_te)
+                need_save = not self.save_best or self.best_test_loss > test_eval[2]
+                if self.best_test_loss > test_eval[2] and self.save_best:
+                    self.best_test_loss = test_eval[2]
                 self.train_hists.append([global_step] + train_eval)
                 self.test_hists.append([global_step] + test_eval)
                 if self.verbose is not None and it_epoch % self.verbose == 0:
                     self.logger.log('\nglobal_step:',global_step, '  epoch:',global_step//it_pep,
-                          '\n   items:        [loss_policy,       loss_value,           loss_total,            acc_value]:',
+                          '\n   items:        [loss_policy,  loss_value,   loss_total,    acc_value,   acc_policy]:',
                           '\n   train_eval: ',train_eval, 
-                          '\n   test_eval:',  test_eval)
+                          '\n   test_eval:  ',  test_eval)
                     self.logger.log('learning rate:', sess.run(self.ts['lr']))
-                if self.path is not None and it_epoch % self.save_epochs == 0:
+                if self.path is not None and it_epoch % self.save_epochs == 0 and need_save:
                     path = self.saver.save(sess, self.path + '/model.ckpt', global_step=global_step_t, write_meta_graph=False)
                     if self.verbose  is not None:
                         self.logger.log('model saved in',path)
                     if self.lock_model_path is not None:
-                        self.lock_model_path.acquire()
-                    self.trained_model_paths.append(path)
-                    if self.lock_model_path is not None:
-                        self.lock_model_path.release()
-                    self.save_hists()
+                        with self.lock_model_path:
+                            self.trained_model_paths.append(path)
+                    else:
+                         self.trained_model_paths.append(path)
+                self.save_hists()
 
     def init_hists(self, refresh_saving=False):
         """
@@ -397,15 +431,18 @@ class ZeroNN:
             else load the existing histories and append new histories to them
         """
         if self.train_hists is not None and self.test_hists is not None:
+            self.best_test_loss = self.test_hists[-1][2]
             return
         if refresh_saving:
             self.train_hists = []
             self.test_hists = []
+            self.best_test_loss = 10000000
             return None
         path_train = join(self.path, npfn('train'))
         path_test = join(self.path, npfn('test'))
         self.train_hists = [] if not exists(path_train) else np.load(path_train).tolist()
         self.test_hists = [] if not exists(path_test) else np.load(path_test).tolist()
+        self.best_test_loss = 10000000 if not exists(path_test) else self.test_hists[-1][2] 
 
     def save_hists(self):
         """
@@ -504,28 +541,98 @@ def _test_flip():
 
 
 def new_train():
-    top_folder = mkdir('new_train_zeronn')
-    zeronn = ZeroNN(verbose=10, epoch=80, path=join(top_folder, 'zeronn8'), 
-                    save_epochs=10, batch_size=768)
-    zeronn.sum_plot()
-    exit(0)
-    # zeronn.fit()
-    for folder in ['zero_nns885/selfplay/0', 
-                   'zero_nns885/selfplay/1_2_3', 
-                   'zero_nns885/selfplay/3', 
-                   'zero_nns885/selfplay']:
-        X = np.load(join(folder, 'selfplay0.npy'))
-        Y_policy = np.load(join(folder, 'selfplay1.npy'))
-        Y_value = np.load(join(folder, 'selfplay2.npy'))
-        zeronn.fit(X, Y_policy, Y_value, 0.1)
-        print(folder, 'trained')
-    print('trainning finished!')
+    for top_folder, use_prek in [#['new_train_zeronn_nokernel', False], 
+                                 ['new_train_zeronn_kernel', True]]:
+        print('\n\nStart train', mkdir(top_folder))
+        # top_folder = mkdir('new_train_zeronn_nokernel')
+        zeronn = ZeroNN(verbose=10, epoch=200, path=join(top_folder, 'zeronn8'), 
+                        save_epochs=10, batch_size=1024, use_prek=use_prek, lr_init=0.0005)
+        # zeronn.sum_plot()
+    
+        # zeronn.fit()
+        for folder in [
+                        'zero_nns885/selfplay/0', 
+                       'zero_nns885/selfplay/1_2_3', 
+                       # 'zero_nns885/selfplay/3', 
+                       # 'zero_nns885/selfplay',
+                        #'zero_nns885/sp1',
+                       ]:
+            X = np.load(join(folder, 'selfplay0.npy'))
+            Y_policy = np.load(join(folder, 'selfplay1.npy'))
+            Y_value = np.load(join(folder, 'selfplay2.npy'))
+            zeronn.fit(X, Y_policy, Y_value, 0.1)
+            print(folder, 'trained')
+        zeronn.sum_plot()
+        print('trainning finished!')
+
+
+def test_copy_possible_params():
+    folder_from = r'F:\Software\vspro\NInRow\NInRow\new_train_zeronn\zeronn8_curr\model.ckpt-44838'
+    top_folder = mkdir('trans_params_test')
+    zeronn = ZeroNN(verbose=10, epoch=1, path=join(top_folder, 'zeronn8'), 
+                    save_epochs=10, batch_size=768, init_path=folder_from)
+
+    num_samples = 1
+    rows = 11
+    cols = 11
+    channel = 4
+    X = np.random.rand(num_samples,rows,cols, channel)
+    Y_value = np.random.randint(0,2,[num_samples,1], dtype=np.int8)
+    Y_policy = np.random.rand(num_samples,rows*cols)
+
+    zeronn.fit(X, Y_policy, Y_value, 0.1)
+    # zeronn.copy_possible_params(folder_from)
 
         
+def pure_train():
+    pure_tr_nn = 'pure_tr_nn'
+    data = [np.load(join(pure_tr_nn, 'data', npfn('selfplay'+str(i)))) for i in range(3)]
+
+    #zeronn = ZeroNN(verbose=10, epoch=10000, path=mkdir('new_tr'), save_best=True,
+    #                     save_epochs=20, batch_size=1024, lr_dec_rate=0.9999)
+    # zeronn.fit(data[0], data[1], data[2], 0.1)
+    
+    print('\n\n\n\n')
+    
+    zeronn = ZeroNN(verbose=10, epoch=10000, path=pure_tr_nn, save_best=True,
+                        save_epochs=20, batch_size=1024, lr_dec_rate=0.9999)
+    zeronn.fit(data[0], data[1], data[2], 0.1)
+        
+
+def train_comp_kern(which):
+    print('use_prekern=',which==1)
+    folder = mkdir('kern_comp')
+    data = [np.load(join('pure_tr_nn', 'data', npfn('selfplay'+str(i)))) for i in range(3)]
+    zeronn = ZeroNN(verbose=10, epoch=500, path=mkdir(join(folder, 'k_'+str(which==1))), save_best=True,
+                        save_epochs=20, batch_size=1024, lr_dec_rate=0.9999, use_prek=which==1)
+    zeronn.fit(data[0], data[1], data[2], 0.1)
+
+
+def train_init_net():
+    for prek in [True, False]:
+        print('prek=',prek)
+        folder = mkdir('data_init/net_prek_' + str(prek))
+        data = [np.load(join('data_init', npfn('selfplay'+str(i)))) for i in range(3)]
+        print('data=',data[0].shape, data[1].shape, data[2].shape)
+        zeronn = ZeroNN(verbose=5, epoch=120, path=folder,
+                            save_epochs=5, batch_size=2048, use_prek=prek)
+        zeronn.fit(data[0], data[1], data[2], 0.1)
+    
+    
+def train_init_net2():
+    folder = mkdir('data_init/net')
+    data = [np.load(join('data_init', npfn('selfplay'+str(i)))) for i in range(3)]
+    print('data=',data[0].shape, data[1].shape, data[2].shape)
+    zeronn = ZeroNN(verbose=10, epoch=120, path=folder,
+                            save_epochs=10, batch_size=2048)
+    zeronn.fit(data[0], data[1], data[2], 0.1)
+
+
 if __name__=='__main__':
     # main_sim_train()
-    new_train()
-
-
+    # pure_train()
+    # test_copy_possible_params()
+    # train_comp_kern(int(sys.argv[1]))
+    train_init_net2()
 
 
