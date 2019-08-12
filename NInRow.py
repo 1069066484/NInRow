@@ -36,14 +36,16 @@ def main_exe():
 
 from nets.ZeroNN import *
 def main_debug():
+    collect_ai_hists = False
     if True:
-        game = Game(11,11,5, Game.Player.AI, Game.Player.AI, collect_ai_hists=True)
+        game = Game(11,11,5, Game.Player.AI, Game.Player.human, collect_ai_hists=collect_ai_hists)
         zeroNN1 = ZeroNN(path=join(FOLDER_ZERO_NNS + '115', 'NNs'), 
-                             ckpt_idx=-1)#join(FOLDER_ZERO_NNS + '885', 'NNs/model.ckpt-10300') )
-        zeroNN1 = None
-    
+                             ckpt_idx=join(FOLDER_ZERO_NNS + '115', 'NNs/model.ckpt-8088') )
+        # model.ckpt-16533
+        # zeroNN1 = None
         game.players[0].mcts.zeroNN = zeroNN1
         game.players[0].mcts.max_acts = 512
+        # game.players[0].mcts.do_policy_prune = False
         # game.players[0].mcts.hand_val = 0.5
         # game.players[0].c = 15
 
@@ -51,51 +53,49 @@ def main_debug():
         # game.players[0].mcts.red_child = True
         # 10.8 9.5
         # game.players[0].mcts.further_check = False
-    
-        game.players[1].mcts.zeroNN = zeroNN1
-        game.players[1].mcts.max_acts = 512
-        game.players[1].mcts.hand_val = 0
+        if False:
+            game.players[1].mcts.zeroNN = None
+            game.players[1].mcts.max_acts = 512
 
         game.start(graphics=True)
     input("over")
-    # return None
-    probs, eval_board, winner = game.ai_hists()
-    print(len(probs), len(eval_board), winner)
-    print(probs[0].shape, eval_board[0].shape, winner)
-    input()
-    for i in range(3):
-        print(probs[i])
-        print(eval_board[i][:,:,0])
-        print(eval_board[i][:,:,1])
-        print(eval_board[i][:,:,2])
-        print(eval_board[i][:,:,3])
-        print('\n\n')
-    print(np.array(probs).shape)
-    print(np.array(eval_board).shape)
-    print(winner)
+
+    if collect_ai_hists:
+        probs, eval_board, winner = game.ai_hists()
+        print(len(probs), len(eval_board), winner)
+        print(probs[0].shape, eval_board[0].shape, winner)
+        game = Game(11,11,5,use_hists=np.array(eval_board))
+        game.start()
+    
 
 
 def eval_debug():
     # zeroNN1 = ZeroNN(verbose=False,path=join(FOLDER_ZERO_NNS, 'NNs'))
-    zeroNN1 = ZeroNN(path=join(FOLDER_ZERO_NNS + '115', 'NNs'))
+    zeroNN1 = ZeroNN(path=join(FOLDER_ZERO_NNS + '115', 'NNs'), 
+                     ckpt_idx=join(FOLDER_ZERO_NNS + '115', 'NNs/model.ckpt-8088'))
     # zeroNN2 = ZeroNN(verbose=False,path=join(FOLDER_ZERO_NNS, 'NNs'))
-    zeroNN2 = None
-    mcts1 = Mcts(0,0,zeroNN=zeroNN1,max_acts_=256)
-    mcts2 = Mcts(0,0,zeroNN=zeroNN2,max_acts_=256)
+    zeroNN2 = ZeroNN(path=join(FOLDER_ZERO_NNS + '115', 'NNs'), 
+                     ckpt_idx=join(FOLDER_ZERO_NNS + '115', 'NNs/model.ckpt-9263'))
+    mcts1 = Mcts(0,0,zeroNN=zeroNN1,max_acts_=512)
+    mcts2 = Mcts(0,0,zeroNN=zeroNN2,max_acts_=512)
     winrate1, winrate2, tie_rate, ai_hists = \
         eval_mcts(11, 11, 5, mcts1, mcts2, sim_times=10, verbose=True)
     print(winrate1, winrate2, tie_rate)
     '''
-    
+    First generation(786) VS no-mcts - 512: 0.775 0.225 -2.7755575615628914e-17 (40 games)
+    Second generationA(8088) VS no-mcts - 512: 0.95 0.0 0.050000000000000044  (40 games)
+    Second generationA(8088) VS First generation(786): 0.8 0.15 0.04999999999999996  (20 games)
+
     '''
 
 
 if __name__=='__main__':
-    main_debug()
-    # eval_debug()
+    # main_debug()
+    eval_debug()
     """
     hists[i] is history of one single game
         hists[i][0]: a list of r*c arrays indicating probs
         hists[i][1]: a list of r*c*4 arrays indicating eval boards
         hists[i][2]: the win role
     """
+

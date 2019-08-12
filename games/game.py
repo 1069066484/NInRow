@@ -67,8 +67,8 @@ class Human:
     def get_valid_action(self):
         while True:
             try:
-                s = input("Your move: ")
-                location = [int(s[0]), int(s[2])]
+                s = input("Your move: ").split(',')
+                location = [int(s[0]), int(s[1])]
                 if self.board.get_loc_state(location) != Board.GridState.empty:
                     raise Exception()
                 return location
@@ -109,13 +109,16 @@ class Game:
     def init_replay(self):
         if self.use_hists is None:
             return
-        while True:
-            if np.sum(self.use_hists[self.hist_it,:,:,:3]) == 0:
-                # input("Going to replay at " + str(self.hist_it), '  sum=', np.sum(self.use_hists[self.hist_it,:,:,:3]))
+        try:
+            while True:
+                if np.sum(self.use_hists[self.hist_it,:,:,:3]) == 0:
+                    # print(1)
+                    # input("Going to replay at " + str(self.hist_it), '  sum=', np.sum(self.use_hists[self.hist_it,:,:,:3]))
+                    self.hist_it += 1
+                    return
                 self.hist_it += 1
-                return
-            self.hist_it += 1
-        raise Exception("Error invalid history, cannot replay")
+        except:
+            raise Exception("Error invalid history, cannot replay")
 
     def graphics(self, to_print=''):
         """
@@ -128,16 +131,16 @@ class Game:
         print(to_print)
         print('\n')
         prints = ['_', '1', '2']
-        print('  ',end='')
+        print('   ',end='')
         for i in range(self.board.board.shape[1]):
-            print('   #'+str(i), end='   ')
+            print('  #'+str(i), end='  ')
         c_cnt = 0
         print('\n')
         for r in self.board.board:
-            print('#'+ str(c_cnt),end='')
+            print('#'+ str(c_cnt) + ' ' * (2 - len(str(c_cnt))),end='')
             for c in r:
-                print('   ',prints[c], end='   ')
-            print('\n\n')
+                print('  ',prints[c], end='  ')
+            print('\n')
             c_cnt += 1
 
     def collect_hists(self, turn):
@@ -173,10 +176,11 @@ class Game:
                     # argmax_this_move = 
                 except:
                     # print
-                    input("Replay over player " + str(turn + 1) + " wins , position: " + str(self.hist_it))
+                    input("Replay over.  player " + str(turn + 1) + " wins , position: " + str(self.hist_it))
+                    self.winner = turn
                     return self.hist_it
                 act = (act0, act1)
-                while np.sum(self.use_hists[self.hist_it,:,:,:2]) == stones + 1:
+                while np.sum(self.use_hists[self.hist_it,:,:,:2]) == stones:
                     self.hist_it += 1
             if act is None:
                 if graphics:
@@ -190,6 +194,7 @@ class Game:
             termination = self.check_over(act, stones)
             if graphics and self.use_hists is not None:
                 input()
+                
             self.collect_hists(turn)
             # Check whether the game is over 
             if termination != Termination.going:
@@ -249,11 +254,22 @@ def eval_mcts(rows, cols, n_in_row, mcts1, mcts2, verbose=True, sim_times=100, c
 
 
 def _test_replay():
-    path = r'F:\Software\vspro\NInRow\NInRow\zero_nns115\good\selfplay0.npy'
-    game = Game(11,11,5,use_hists=path, hist_it=40000)
-    ret = game.start()
-    game = Game(11,11,5,use_hists=path, hist_it=ret)
-    ret = game.start()
+    path = r'F:\Software\vspro\NInRow\NInRow\zero_nns115\godd_mod\nomcts\selfplay0.npy'
+    # print(np.load(path).shape)
+    ret = 0
+    w1 = 0
+    w2 = 0
+    t = 0
+    try:
+        while True:
+            game = Game(11,11,5,use_hists=path, hist_it=ret)
+            ret = game.start()
+            w1 += game.winner == 0
+            w2 += game.winner == 1
+            t += game.winner is None
+    except:
+        pass
+    print(w1, w2, t)
 
 
 if __name__=='__main__':

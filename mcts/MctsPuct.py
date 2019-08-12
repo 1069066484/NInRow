@@ -42,6 +42,7 @@ class Node:
         self.lock = threading.Lock()
         self.move_sim_board(sim_board, True)
         self.last_best = None
+        self.pr = None
         # T_SELECT[0] += time.clock() - t
 
     def prune(self):
@@ -50,18 +51,28 @@ class Node:
             mv = max(self.children, key=lambda child: child.value).value
             if mv >= 0.9999:
                 # print("mv > 0.9999")
-                self.children = [child for child in self.children if child.value >= 0.9]
+                self.children = [child for child in self.children if child.value >= 0.2]
                 # self.pr = 'Almost Win'
             elif mv >= DECIDE_VAL:
                 # print("mv > DECIDE_VAL")
                 self.children = [child for child in self.children if (child.value >= DECIDE_VAL * 0.4)]
                 # self.pr = 'Advantage'
-            elif self.mcts.zeroNN is not None and len(self.children) >= 4:
+            # self.mcts.noise == 0 means diversity is not required
+            if self.mcts.zeroNN is not None and self.mcts.noise == 0:
                 # print("policy prune")
-                pmax = max(self.children, key=lambda child: child.p).p
+                # pmax = max(self.children, key=lambda child: child.p).p
+                self.children.sort(key=lambda child: -child.p)
+                pmax = self.children[0].p
                 if pmax > 0.1:
-                    pmax *= 0.05
-                    self.children = [child for child in self.children if (child.p >= pmax)]
+                    # self.pr = 'Policy'
+                    pmax *= 0.1
+                    keep = int(len(self.avails) * 0.15)
+                    while len(self.children) >= keep and self.children[-1].p < pmax:
+                        self.children.pop()
+                    # self.children = sorted(self.children, )
+                    # pmax *= 0.01
+                    # self.children = [child for child in self.children if (child.p >= pmax)]
+
 
     def won_val(self, role, sim_board):
         if self.move is None:
@@ -158,6 +169,7 @@ class Node:
             2. pieces of the current player
             3. the node's movement(last movement)
             4. the current player
+            "current" indicate the player that plays the move
         The board can be reversed in terms of the opponent's view
         """
         eval_board = np.zeros(shape=[sim_board.shape[0],sim_board.shape[1], 3 + EVAL_HIST], dtype=np.bool)
@@ -168,14 +180,15 @@ class Node:
         # stones of the current player
         eval_board[:,:,1][sim_board==-self.role] = 1
         if self.move is not None:
-            eval_board[:,:,2][self.move[0]][self.move[1]] = 1
-        if EVAL_HIST == 2 and self.parent is not None and self.parent.move is not None:
-            eval_board[:,:,3][self.parent.move[0]][self.parent.move[1]] = 1
-        # at this node, the self.role has moved, so the current player to move is the -self.role
-        # if it is the first player to move next, put 1
-        # the resulted evaluated value is the win rate of the current player to move
-        eval_board[:,:,-1] = int((self.role != GRID_SEL_INT and self.mcts.is_first) or \
-                                (self.role == GRID_SEL_INT and not self.mcts.is_first))
+            eval_board[self.move[0]][self.move[1]][2] = 1
+            eval_board[self.move[0]][self.move[1]][0] = 0
+            eval_board[self.move[0]][self.move[1]][1] = 0
+
+        # at this node, the self.role has moved, so the last player to move is the -self.role
+        # the resulted evaluated value is the win rate of the self.role to play self.move
+        #  Whether this is the first player.
+        eval_board[:,:,-1] = int((self.role == GRID_SEL_INT and self.mcts.is_first) or \
+                                (self.role != GRID_SEL_INT and not self.mcts.is_first))
         return eval_board
 
     def print_eval_board(self, sim_board):
@@ -243,6 +256,8 @@ class Node:
             # if the evaluation queue cannot be full for a long time, just eval a single game board
             # the logic here should be carefully dealt with:
             #   if there is something unexpected with multi-eval, turn to single-eval
+            # Function eval_state returns the policy and win rates identified by the player to play
+            #   the next move.
             if not self.mcts.wait_for_full():
                 value, probs = self.mcts.eval_state_single(eval_board)
             else:
@@ -260,7 +275,7 @@ class Node:
 
 class MctsPuct:
     def __init__(self, board_rows_, board_cols_, n_target_=4, max_acts_=1000, c=10, inherit=True, zeroNN=None, n_threads=4,
-                 multi_wait_time_s=0.030, const_temp=0, noise=None, temp2zero_moves=0xfffff,
+                 multi_wait_time_s=0.030, const_temp=0, noise=0, temp2zero_moves=0xfffff,
                  resign_val=0xffff, usedef=None, do_prune=True, hand_val=0.1, d_time=0):
         """
         @board_rows_: number of rows of the game board
@@ -363,7 +378,6 @@ class MctsPuct:
         self.temp_reciprocal = other.temp_reciprocal
         self.temp2zero_moves = other.temp2zero_moves
         self.resign_val = other.resign_val
-        self.hand_val = other.hand_val
 
     def copy_params(self, other):
         self.from_another_mcts(other)
@@ -384,7 +398,7 @@ class MctsPuct:
             node.value_visit_plus(self.virtual_value_plus, self.virtual_visits_plus)
 
     def check_over(self, bd, pos, ret_val=False, stones=None):
-        return check_over_full(bd, pos, self.n_target, ret_val, stones)
+        return check_over_full(bd, pos, self.n_target, ret_val, stones, self.further_check)
 
     def backup(self, node, bd):
         """
@@ -444,14 +458,10 @@ class MctsPuct:
         """
         t = time.clock()
         if self.is_first is None:
+            self.further_check = self.zeroNN is None
             self.is_first = (np.sum(board) == 0)
             self.defprobs = np.zeros((self.board_rows, self.board_cols)) +\
                 1.0/ self.board_cols / self.board_rows
-            if self.noise is None:
-                if self.zeroNN is not None:
-                    self.noise = 0.01
-                else:
-                    self.noise = 0.1/ self.board_cols / self.board_rows
         self.eval_queues = []
         self.search_over = 0
         self.root = self.simulate(board.copy())
@@ -475,7 +485,7 @@ class MctsPuct:
                         udeno / (self.visits+1)
             '''
             print("T_SELECT=", T_SELECT, "  Termination T=", TERM_T)
-            print("self.root.visits=", self.root.visits)
+            print("self.root.visits=", self.root.visits, ' root.pr=', self.root.pr)
             print('self.root.value:',self.root.value /self.root.visits)
             print('best avg val=', best.value / (best.visits+0.01),
                   '  cp=', np.sqrt(self.root.visits) / (best.visits + 1) * best.p * self.c, '  c=', self.c)
@@ -489,7 +499,7 @@ class MctsPuct:
             print(self.root.children_values(board))
             print(self.root.children_visits(board))
             print("time=",time.clock()-t)
-            print("best:", len(best.children))
+            print("best:", len(best.children), '  best.pr=',best.pr)
             print(best.play().move, '->', best.play().play().move)
             print(best.children_values(board))
             print(best.children_visits(board))

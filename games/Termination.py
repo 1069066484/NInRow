@@ -37,7 +37,7 @@ move_funs = [
     ]
 
 
-def check_over_full(board, pos, targets, ret_val=False, stones=None):
+def check_over_full_handcraft(board, pos, targets, ret_val=False, stones=None):
     """
     return Termination
     An efficient algorithm is used to check the game is over or not.
@@ -98,6 +98,50 @@ def check_over_full(board, pos, targets, ret_val=False, stones=None):
             if g == Grid.GRID_EMP:
                 return [Termination.going, val] if ret_val else Termination.going
     return [Termination.tie, 0] if ret_val else Termination.tie
+
+
+def check_over_full_simple(board, pos, targets, ret_val=False, stones=None):
+    """
+    return Termination
+    An efficient algorithm is used to check the game is over or not.
+    Time complexity = targets * 8 if stones provided
+    """
+    is_pos_legal = lambda pos: board.shape[0] > pos[0] >= 0 and board.shape[1] > pos[1] >= 0
+    
+    bd = board
+
+    role = bd[pos[0]][pos[1]]
+
+    for f in move_funs:
+        score = 1
+        pos_t = (pos[0], pos[1])
+
+        for p in [1, -1]:
+            
+            pos_t = f(p, pos)
+            while is_pos_legal(pos_t) and bd[pos_t[0]][pos_t[1]] == role:
+                score += 1
+                pos_t = f(p,pos_t)
+
+        if score >= targets:
+            return [Termination.won, 1] if ret_val else Termination.won
+
+    if stones is not None:
+        if stones == bd.size:
+            return [Termination.tie, 0] if ret_val else Termination.tie
+        else:
+            return [Termination.going, 0] if ret_val else Termination.going
+    for r in bd:
+        for g in r:
+            if g == Grid.GRID_EMP:
+                return [Termination.going, 0] if ret_val else Termination.going
+    return [Termination.tie, 0] if ret_val else Termination.tie
+
+
+def check_over_full(board, pos, targets, ret_val=False, stones=None, further=True):
+    return check_over_full_handcraft(board, pos, targets, ret_val, stones) if further else \
+        check_over_full_simple(board, pos, targets, ret_val, stones)
+
 
 
 def test_check_over_full():
