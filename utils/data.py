@@ -29,8 +29,8 @@ def posfix_filename(filename, postfix):
     return filename
 
 
-def npfilename(filename):
-    return posfix_filename(filename, '.npy')
+def npfilename(filename, z=False):
+    return posfix_filename(filename, '.npy') if not z else posfix_filename(filename, '.npz')
 
 
 def pkfilename(filename):
@@ -260,6 +260,21 @@ def traverse(folder, postfix='', rec=False, only_file=True):
                 yield path
         if not rec:
             break
+
+
+def traversed_filelist(folder, postfix='', rec=False, only_file=True):
+    return [path for path in traverse(folder=folder, postfix=postfix, rec=rec, only_file=only_file)]
+
+
+def str2int(s):
+    return to_type(s, int)
+
+
+def to_type(ori, type_name):
+    try:
+        return type_name(ori)
+    except:
+        return None
 
 
 def _test_labels_one_hot():

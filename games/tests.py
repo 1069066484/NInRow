@@ -151,8 +151,23 @@ def hand_val_test():
 '''
 
 
+from nets.ZeroNN import *
+def op_eval_test():
+    # zeroNN1 = ZeroNN(verbose=False,path=join(FOLDER_ZERO_NNS, 'NNs'))
+    zeroNN1 = ZeroNN(path=join(FOLDER_ZERO_NNS + '115', 'NNs'), 
+                     ckpt_idx=join(FOLDER_ZERO_NNS + '115', 'NNs/model.ckpt-153223'))
+    zeroNN2 = zeroNN1
+    mcts1 = Mcts(0,0,zeroNN=zeroNN1,max_acts_=512, op_weight=None)
+    mcts2 = Mcts(0,0,zeroNN=zeroNN2,max_acts_=512, op_weight=1)
+    winrate1, winrate2, tie_rate, ai_hists = \
+        eval_mcts(11, 11, 5, mcts1, mcts2, sim_times=5, verbose=True)
+    print(winrate1, winrate2, tie_rate)
+    # 0.8 0.2 -5.551115123125783e-17
+    # 0.6 0.4 0.0
+
 
 if __name__=='__main__':
     # further_check_test()
     # defpolicy_test()
-    hand_val_test()
+    # hand_val_test()
+    op_eval_test()
