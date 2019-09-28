@@ -1,6 +1,6 @@
 # NInRow
 NInRow-AI. The project aims to reproduce algorithm of AlphaGO in NInRow game, with a low cost of computation, of course.
-The entrance script is NInRow.py. The AI can be named Alpha NInRow Rim.
+The entrance script is NInRow.py. 
 
 
 Main References:
